@@ -370,9 +370,7 @@ def pick_anime(results):
         anime = results[offset + choices.index(sel)]
         console.clear()
         show_anime_info(anime)
-        c = questionary.confirm("Continue with this anime?", style=QS, default=True).ask()
-        if c:
-            return anime
+        return anime
 
 
 def pick_season(seasons):
