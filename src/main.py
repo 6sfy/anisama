@@ -917,6 +917,8 @@ def anime_flow(anime, lang, download, episodes, pref, quiet, dl_dir, settings,
             season = next((s for s in seasons if s["url"] == start_season_url), None)
             if season is None:
                 season = pick_season(seasons)
+            # Reset so the next loop iteration doesn't get stuck here
+            start_season_url = None
         else:
             season = pick_season(seasons)
         if season is None:
@@ -968,7 +970,7 @@ def anime_flow(anime, lang, download, episodes, pref, quiet, dl_dir, settings,
                     continue
                 cont = questionary.confirm("Return to episode list?", style=QS, default=False).ask()
                 if not cont:
-                    break
+                    return  # exit to main menu
 
             episodes = None
             continue
@@ -1070,7 +1072,7 @@ def voiranime_flow(anime, lang, download, episodes, pref, quiet, dl_dir="downloa
                     continue
                 cont = questionary.confirm("Return to episode list?", style=QS, default=False).ask()
                 if not cont:
-                    break
+                    return  # exit to main menu
 
             episodes = None
             continue
