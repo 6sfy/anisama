@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -113,24 +114,51 @@ def parse_range(txt):
     return sorted(res)
 
 
+def _fetch_github_catalog_if_enabled(settings):
+    if settings.get("auto_fetch_github", True):
+        return with_spinner("Downloading catalog from GitHub...", cache.fetch_github_catalog)
+    return None
+
+
+def _background_update(domain, settings):
+    """Fetch new catalog entries in the background without blocking the UI."""
+    if not settings.get("auto_fetch_new", True):
+        return
+
+    def _run():
+        try:
+            cache.download_combined_catalog(domain)
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def ensure_catalog(domain, force=False, settings=None):
     if not settings:
         settings = cache.load_settings()
-    if force or not cache.is_cache_valid():
-        if not cache.CATALOG_FILE.exists() or settings.get("auto_fetch_github", True):
-            cat = with_spinner("Downloading catalog from GitHub...", cache.fetch_github_catalog)
-            if cat:
-                ok(f"Catalog downloaded from GitHub: {len(cat)} anime")
-        if settings.get("auto_fetch_new", True) or force:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as p:
-                p.add_task("Updating catalog with new entries...", total=None)
-                cat = cache.download_combined_catalog(domain)
-            ok(f"Catalog updated: {len(cat)} anime")
-            return cat
+
+    # Force update (-U): full synchronous refresh
+    if force:
+        cat = _fetch_github_catalog_if_enabled(settings)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as p:
+            p.add_task("Updating catalog with new entries...", total=None)
+            cat = cache.download_combined_catalog(domain)
+        ok(f"Catalog updated: {len(cat)} anime")
+        return cat
+
+    # Cache invalid or missing: quick GitHub fetch first
+    if not cache.is_cache_valid() or not cache.CATALOG_FILE.exists():
+        cat = _fetch_github_catalog_if_enabled(settings)
+        if cat:
+            ok(f"Catalog downloaded from GitHub: {len(cat)} anime")
+        else:
+            note("Could not fetch GitHub catalog, using local catalog.")
+
     return cache.load_combined_catalog(domain)
 
 
@@ -432,7 +460,7 @@ PREF_HOSTS = ["sendvid", "vidmoly", "smoothpre", "vidhide", "streamwish", "oneup
 MP4_HOSTS = ["sendvid", "oneupload", "sibnet"]
 
 
-def test_url_speed(url, referer=None, sample_bytes=512000):
+def test_url_speed(url, referer=None, sample_bytes=256000):
     """Measure download speed of a URL by fetching the first sample_bytes.
     Returns bytes per second, or 0 on failure.
     """
@@ -466,7 +494,7 @@ def format_speed(bps):
 
 
 def pick_fastest_mirror(ep, prefer_mp4=True, test_speed=True, quiet=False):
-    """Resolve all mirrors, optionally speed-test them, and return the fastest playable source."""
+    """Resolve all mirrors in parallel, optionally speed-test the best ones, and return the fastest playable source."""
     candidates = resolve_all_mirrors(ep)
     if not candidates:
         return None
@@ -474,12 +502,18 @@ def pick_fastest_mirror(ep, prefer_mp4=True, test_speed=True, quiet=False):
     if len(candidates) == 1:
         return candidates[0]
 
+    # Sort playable first: mp4 > webm > m3u8 > raw
+    type_rank = {"mp4": 0, "webm": 1, "m3u8": 2, "raw": 3}
+    candidates.sort(key=lambda c: type_rank.get(c.get("type", "raw"), 3))
+
     if test_speed:
-        # Speed-test in parallel using ThreadPoolExecutor
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        # Limit speed-test to the top candidates to avoid wasting time on slow mirrors
+        top_n = min(4, len(candidates))
+        top_candidates = candidates[:top_n]
         speeds = {}
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            fut_map = {ex.submit(test_url_speed, c["url"], c.get("referer")): i for i, c in enumerate(candidates)}
+        with ThreadPoolExecutor(max_workers=top_n) as ex:
+            fut_map = {ex.submit(test_url_speed, c["url"], c.get("referer")): i for i, c in enumerate(top_candidates)}
             for f in as_completed(fut_map):
                 i = fut_map[f]
                 try:
@@ -487,28 +521,25 @@ def pick_fastest_mirror(ep, prefer_mp4=True, test_speed=True, quiet=False):
                 except Exception:
                     speeds[i] = 0
 
-        # Sort: prefer MP4, then by speed. RAW pages get 0 speed so they drop to bottom.
         def sort_key(item):
             i, c = item
             t = c.get("type", "raw")
-            type_rank = {"mp4": 0, "webm": 1, "m3u8": 2, "raw": 3}.get(t, 3)
+            rank = type_rank.get(t, 3)
             speed = speeds.get(i, 0)
             # If we prefer mp4, boost mp4/webm speed artificially so they win over slightly faster m3u8
             if prefer_mp4 and t in ("mp4", "webm"):
                 speed = speed * 2 + 1_000_000
-            return (type_rank, -speed)
+            return (rank, -speed)
 
-        ranked = sorted(enumerate(candidates), key=sort_key)
+        ranked = sorted(enumerate(top_candidates), key=sort_key)
         best_idx, best = ranked[0]
         if not quiet:
-            for i, c in ranked[:3]:
+            for i, c in ranked:
                 spd = speeds.get(i, 0)
                 spd_str = format_speed(spd) if spd > 0 else "unreachable"
                 note(f"  {c.get('type','raw').upper():6} {spd_str:<12} {urlparse(c['url']).netloc}")
         return best
 
-    # No speed test: just prefer mp4
-    candidates.sort(key=lambda c: {"mp4": 0, "webm": 1, "m3u8": 2, "raw": 3}.get(c.get("type", "raw"), 3))
     return candidates[0]
 
 
@@ -564,34 +595,68 @@ def resolve_best_mirror(ep, prefer_mp4=True):
     return None
 
 
-def resolve_all_mirrors(ep):
-    """Resolve every mirror for an episode and return list of {url,type,referer}."""
+def resolve_all_mirrors(ep, max_workers=4, single_timeout=8):
+    """Resolve every mirror for an episode in parallel and return list of {url,type,referer}."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     found = []
     mirrors = ep.get("mirrors", {})
     if not mirrors:
         return found
+
+    ordered_keys = sorted(mirrors.keys(), key=lambda x: int(x[3:]))
+
+    def resolve_one(k):
+        u = mirrors[k]
+        try:
+            r = scraper.resolve_episode_url(u)
+            if r and r.get("url"):
+                r.setdefault("referer", u)
+                return r
+        except Exception:
+            pass
+        return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        fut_map = {ex.submit(resolve_one, k): k for k in ordered_keys}
+        for f in as_completed(fut_map):
+            try:
+                r = f.result(timeout=single_timeout)
+                if r:
+                    results.append(r)
+            except Exception:
+                pass
+
     seen = set()
     raw_items = []
-    for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
-        u = mirrors[k]
-        r = scraper.resolve_episode_url(u)
-        if r and r.get("url") and r["url"] not in seen:
-            r.setdefault("referer", u)
+    for r in results:
+        if r["url"] not in seen:
             seen.add(r["url"])
             if r.get("type") == "raw":
                 raw_items.append(r)
             else:
                 found.append(r)
 
-    # Try harder on raw URLs using generic embed resolver
-    for r in raw_items:
-        deeper = resolver.resolve_generic(r["url"])
-        if deeper and deeper.get("url") and deeper["url"] not in seen and deeper.get("type") != "raw":
-            deeper.setdefault("referer", r.get("referer", r["url"]))
-            seen.add(deeper["url"])
-            found.append(deeper)
-        else:
-            found.append(r)
+    # Try harder on raw URLs using generic embed resolver (in parallel)
+    if raw_items:
+        deeper_found = []
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            fut_map = {ex.submit(resolver.resolve_generic, r["url"]): r for r in raw_items}
+            for f in as_completed(fut_map):
+                r = fut_map[f]
+                try:
+                    deeper = f.result(timeout=single_timeout)
+                    if deeper and deeper.get("url") and deeper["url"] not in seen and deeper.get("type") != "raw":
+                        deeper.setdefault("referer", r.get("referer", r["url"]))
+                        seen.add(deeper["url"])
+                        deeper_found.append(deeper)
+                    else:
+                        deeper_found.append(r)
+                except Exception:
+                    deeper_found.append(r)
+        found.extend(deeper_found)
+
     return found
 
 
@@ -1120,7 +1185,15 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False):
     if not quiet:
         console.print(f"\n[{ST['sel']}]Episode {n}:[/{ST['sel']}] Resolving video URL...")
 
-    # Auto-pick with speed test and MP4 preference
+    # Fast path: try to get a playable MP4 quickly without speed-testing everything
+    if prefer_mp4:
+        fast = resolve_best_mirror(e, prefer_mp4=True)
+        if fast and fast.get("type") in ("mp4", "webm"):
+            if not quiet:
+                ok(f"Best source: {fast.get('type','raw').upper()} from {urlparse(fast['url']).netloc}")
+            return fast
+
+    # Full path: resolve all mirrors in parallel and speed-test the best ones
     r = pick_fastest_mirror(e, prefer_mp4=prefer_mp4, test_speed=True, quiet=quiet)
     if not r:
         err(f"Failed to resolve episode {n}.")
@@ -1260,6 +1333,7 @@ def cli(query, lang, dub, download, episodes, player, update, show_settings, qui
         sys.exit(1)
 
     catalog = ensure_catalog(domain, force=update, settings=settings)
+    _background_update(domain, settings)
     workflow(query, lang, download, episodes, player, quiet, domain, catalog, from_menu=no_cli)
 
 
@@ -1391,6 +1465,7 @@ def continue_menu(recent):
                 err("Could not reach any Anime-Sama domain.")
                 return
             catalog = ensure_catalog(domain, settings=settings)
+            _background_update(domain, settings)
             console.clear()
             show_banner()
             show_info(domain, catalog)
