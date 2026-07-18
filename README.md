@@ -9,12 +9,12 @@
 
 ## About
 
-<strong>Welcome to <code>anisama</code>, a Python CLI + API server to browse, watch, and download anime from multiple sources (VOSTFR/VF).</strong>
+<strong>Welcome to <code>anisama</code>, a Python CLI to browse, watch, and download anime from multiple sources (VOSTFR/VF).</strong>
 
 - Inspired by [ani-cli](https://github.com/pystardust/ani-cli), the original shell-based anime streaming tool.
 - Scrapes 6 sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix.
 - Interactive TUI built with [Rich](https://github.com/Textualize/rich) and [Questionary](https://github.com/tmbo/questionary).
-- Optional API server for remote access and integration.
+- Connects to the [anisama API](https://github.com/6sfy/anisama-api) for fast search and video resolution.
 
 <div align="center">
   <p>
@@ -48,8 +48,7 @@ anisama/
 │   │   ├── settings.py     # Settings menu
 │   │   └── workflow.py     # Main workflow (search, play, download)
 │   └── api/                # Remote API client
-│       └── client.py       # Wrapper for anisama.sexcaller.lol
-├── api/                    # API server (repo séparé: 6sfy/anisama-api)
+│       └── client.py       # Wrapper for anisama API
 └── data/                   # Local catalog/settings storage
 ```
 
@@ -65,12 +64,11 @@ anisama/
 - [x] Episode range support (1-5 or 1,3,5)
 - [x] Multiple video mirrors with automatic speed-tested fallback
 - [x] Player support: mpv, VLC, IINA, MoonPlayer, ImPlay
-- [x] Smart catalog with GitHub seeding + incremental updates
+- [x] API-first resolve with local fallback
 - [x] "Continue watching" history menu
 - [x] AniList-powered info panel (score, status, episodes, studios, tags, synopsis)
 - [x] Prefer MP4 sources over HLS/m3u8 for faster playback
 - [x] Automatic m3u8 → mp4 conversion for downloads
-- [x] REST API server (multi-source, SQLite-backed)
 - [ ] More sources / languages
 
 ## Installation
@@ -89,17 +87,9 @@ cd anisama
 pip install -e .
 ```
 
-### API server
-
-```sh-session
-cd api
-pip install -r requirements.txt
-python run.py
-```
-
 ## Usage
 
-### CLI interactive mode
+### Interactive mode
 
 ```sh-session
 anisama
@@ -129,19 +119,9 @@ anisama -p vlc "berserk"
 | `--version` | Show version |
 | `-h, --help` | Show help |
 
-### API endpoints
+## API
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/v2/search?q=QUERY` | Search anime across all sources |
-| `GET /api/v2/catalog` | Full catalog with source/pagination filters |
-| `GET /api/v2/episodes?source=SOURCE&slug=SLUG` | Episode list for an anime |
-| `GET /api/v2/resolve?url=URL` | Resolve a video URL |
-| `GET /api/v2/resolve-episode` | Resolve one episode |
-| `GET /api/v2/sources` | Available sources with counts |
-| `GET /api/v2/stats` | Catalog statistics |
-| `GET /api/v2/info?title=TITLE` | AniList info |
-| `GET /player?url=URL` | Video player page |
+anisama uses a centralized API for fast search and video resolution. The API server source is available at [github.com/6sfy/anisama-api](https://github.com/6sfy/anisama-api).
 
 ## Sources
 
