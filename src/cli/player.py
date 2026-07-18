@@ -4,19 +4,19 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .config import PLAYER_PATHS
+from ..core.config import PLAYER_PATHS
 
 def find_player(name):
-    system = platform.system()
+    sys_name = platform.system()
     exe = name
-    if system == "Windows" and not exe.endswith(".exe"):
+    if sys_name == "Windows" and not exe.endswith(".exe"):
         exe = f"{name}.exe"
 
     f = shutil.which(exe)
     if f:
         return f
 
-    for p in PLAYER_PATHS.get(system, {}).get(name, []):
+    for p in PLAYER_PATHS.get(sys_name, {}).get(name, []):
         if "\\" in p or "/" in p:
             if Path(p).exists():
                 return p
@@ -100,4 +100,5 @@ def download_url(url, out_dir, fname, use_ytdlp=True):
             for chunk in r.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
+
     return out

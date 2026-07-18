@@ -19,8 +19,7 @@ def _get_client():
 
 
 def _extract_video_url(text, base_url=""):
-    """Generic helper: try to find a direct video URL in HTML/JS text."""
-    # Try m3u8 first, then mp4/webm
+    # try m3u8 first, then mp4/webm
     patterns = [
         # JS/JSON common patterns
         (r'(?:var|let|const)\s+(?:video[_-]?url|source[_-]?url|file|src|url|video)\s*=\s*["\']([^"\']+)["\']', None),
@@ -72,7 +71,6 @@ def _extract_video_url(text, base_url=""):
 
 
 def _resolve_embed_page(url, depth=0):
-    """Fetch an embed page and recursively try to find a direct video URL."""
     if depth > 2:
         return None
     c = _get_client()
@@ -310,7 +308,6 @@ def resolve_with_ytdlp(url):
 
 
 def resolve_generic(url):
-    """Last resort generic resolver for any embed page."""
     ytdlp_result = resolve_with_ytdlp(url)
     if ytdlp_result:
         return ytdlp_result
@@ -341,6 +338,7 @@ def resolve_voiranime_episode(episode_url, lang):
     except Exception:
         pass
     return None
+
 
 RESOLVER_MAP: dict[str, callable] = {
     "vidmoly.to": resolve_vidmoly,

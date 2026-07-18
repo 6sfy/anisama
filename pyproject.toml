@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "anisama"
-version = "1.0.3"
+version = "1.1.0"
 description = "A CLI tool to browse, watch, and download anime from Anime-Sama (VOSTFR/VF)"
 authors = [
     {name = "6sfy"}
@@ -41,7 +41,7 @@ dependencies = [
 Repository = "https://github.com/6sfy/anisama"
 
 [project.scripts]
-anisama = "src.main:main"
+anisama = "src.cli.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

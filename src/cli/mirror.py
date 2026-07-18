@@ -1,0 +1,310 @@
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlparse
+
+import httpx
+
+from ..core import scraper, resolver, cache
+from ..core.config import RESOLVER_HEADERS
+from .display import console, ST, note, ok, err
+
+PREF_HOSTS = ["sendvid", "vidmoly", "smoothpre", "vidhide", "streamwish", "oneupload", "sibnet"]
+MP4_HOSTS = ["sendvid", "oneupload", "sibnet"]
+
+def test_url_speed(url, referer=None, sample_bytes=256000):
+    headers = dict(RESOLVER_HEADERS)
+    if referer:
+        headers["Referer"] = referer
+    try:
+        start = time.perf_counter()
+        with httpx.stream("GET", url, headers=headers, timeout=10, follow_redirects=True) as r:
+            if r.status_code >= 400:
+                return 0
+            downloaded = 0
+            for chunk in r.iter_bytes(chunk_size=8192):
+                downloaded += len(chunk)
+                if downloaded >= sample_bytes:
+                    break
+            elapsed = time.perf_counter() - start
+            if elapsed <= 0:
+                return 0
+            return int(downloaded / elapsed)
+    except Exception:
+        return 0
+
+
+
+def format_speed(bps):
+    if bps >= 1_000_000:
+        return f"{bps/1_000_000:.1f} MB/s"
+    if bps >= 1_000:
+        return f"{bps/1_000:.1f} KB/s"
+    return f"{bps} B/s"
+
+
+
+def pick_fastest_mirror(ep, prefer_mp4=True, test_speed=True, quiet=False):
+    """Resolve all mirrors in parallel, optionally speed-test the best ones, and return the fastest playable source."""
+    candidates = resolve_all_mirrors(ep)
+    if not candidates:
+        return None
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Sort playable first: mp4 > webm > m3u8 > raw
+    type_rank = {"mp4": 0, "webm": 1, "m3u8": 2, "raw": 3}
+    candidates.sort(key=lambda c: type_rank.get(c.get("type", "raw"), 3))
+
+    if test_speed:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        ranked = sorted(enumerate(candidates), key=lambda x: type_rank.get(x[1].get("type", "raw"), 3))
+        speeds = {}
+        has_mp4 = any(c.get("type") in ("mp4", "webm") for c in candidates)
+        for i, c in ranked:
+            t = c.get("type", "raw")
+            if t not in ("mp4", "webm"):
+                speeds[i] = 0 if has_mp4 else 1_000_000
+                continue
+            speeds[i] = 0
+            try:
+                speeds[i] = test_url_speed(c["url"], c.get("referer"))
+            except Exception:
+                pass
+
+        def sort_key(item):
+            i, c = item
+            t = c.get("type", "raw")
+            rank = type_rank.get(t, 3)
+            speed = speeds.get(i, 0)
+            if prefer_mp4 and t in ("mp4", "webm"):
+                speed = speed * 2 + 1_000_000
+            return (rank, -speed)
+
+        ranked = sorted(enumerate(candidates), key=sort_key)
+        best_idx, best = ranked[0]
+        if not quiet:
+            for i, c in ranked:
+                spd = speeds.get(i, 0)
+                t = c.get("type", "raw")
+                if t in ("mp4", "webm"):
+                    spd_str = format_speed(spd) if spd > 0 else "unreachable"
+                else:
+                    spd_str = "skipped (m3u8)"
+                note(f"  {c.get('type','raw').upper():6} {spd_str:<14} {urlparse(c['url']).netloc}")
+        return best
+
+    return candidates[0]
+
+
+
+def resolve_best_mirror(ep, prefer_mp4=True):
+    """Resolve a single best mirror. Prefers known hosts, then speed if possible."""
+    settings = cache.load_settings()
+    pref = settings.get("preferred_hosts", "")
+    if pref:
+        hosts = [h.strip() for h in pref.split(",") if h.strip()]
+    else:
+        hosts = PREF_HOSTS
+    mirrors = ep.get("mirrors", {})
+    if not mirrors:
+        return None
+
+    def try_mirror(u, want_type=None):
+        r = scraper.resolve_episode_url(u)
+        if r and r.get("url"):
+            r["referer"] = u
+            if want_type and r.get("type") != want_type:
+                return None
+            return r
+        return None
+
+    if prefer_mp4:
+        mp4_hosts = [h for h in hosts if h in MP4_HOSTS] or MP4_HOSTS
+        for h in mp4_hosts:
+            for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
+                u = mirrors[k]
+                if h in u.lower():
+                    r = try_mirror(u, want_type="mp4")
+                    if r:
+                        return r
+        for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
+            u = mirrors[k]
+            r = try_mirror(u, want_type="mp4")
+            if r:
+                return r
+
+    for h in hosts:
+        for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
+            u = mirrors[k]
+            if h in u.lower():
+                r = try_mirror(u)
+                if r and r.get("type") != "raw":
+                    return r
+
+    for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
+        u = mirrors[k]
+        r = try_mirror(u)
+        if r:
+            return r
+    return None
+
+
+
+def resolve_all_mirrors(ep, max_workers=4, single_timeout=8):
+    """Resolve every mirror for an episode in parallel and return list of {url,type,referer}."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    found = []
+    mirrors = ep.get("mirrors", {})
+    if not mirrors:
+        return found
+
+    ordered_keys = sorted(mirrors.keys(), key=lambda x: int(x[3:]))
+
+    def resolve_one(k):
+        u = mirrors[k]
+        try:
+            r = scraper.resolve_episode_url(u)
+            if r and r.get("url"):
+                r.setdefault("referer", u)
+                return r
+        except Exception:
+            pass
+        return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        fut_map = {ex.submit(resolve_one, k): k for k in ordered_keys}
+        for f in as_completed(fut_map):
+            try:
+                r = f.result(timeout=single_timeout)
+                if r:
+                    results.append(r)
+            except Exception:
+                pass
+
+    seen = set()
+    raw_items = []
+    for r in results:
+        if r["url"] not in seen:
+            seen.add(r["url"])
+            if r.get("type") == "raw":
+                raw_items.append(r)
+            else:
+                found.append(r)
+
+    # Try harder on raw URLs using generic embed resolver (in parallel)
+    if raw_items:
+        deeper_found = []
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            fut_map = {ex.submit(resolver.resolve_generic, r["url"]): r for r in raw_items}
+            for f in as_completed(fut_map):
+                r = fut_map[f]
+                try:
+                    deeper = f.result(timeout=single_timeout)
+                    if deeper and deeper.get("url") and deeper["url"] not in seen and deeper.get("type") != "raw":
+                        deeper.setdefault("referer", r.get("referer", r["url"]))
+                        seen.add(deeper["url"])
+                        deeper_found.append(deeper)
+                    else:
+                        deeper_found.append(r)
+                except Exception:
+                    deeper_found.append(r)
+        found.extend(deeper_found)
+
+    return found
+
+
+
+def pick_mirror(ep):
+    """Let user pick a mirror if multiple resolutions/types exist."""
+    all_resolved = resolve_all_mirrors(ep)
+    if not all_resolved:
+        return None
+    if len(all_resolved) == 1:
+        return all_resolved[0]
+
+    # Sort playable first: mp4 > m3u8 > raw
+    def sort_key(r):
+        t = r.get("type", "raw")
+        return {"mp4": 0, "webm": 1, "m3u8": 2, "raw": 3}.get(t, 3)
+
+    all_resolved.sort(key=sort_key)
+
+    choices = []
+    for i, r in enumerate(all_resolved, 1):
+        t = r.get("type", "raw").upper()
+        u = r["url"]
+        host = urlparse(u).netloc
+        choices.append(f"{i}. [{t}] {host}")
+    choices.append("Auto (best)")
+    choices.append(BACK)
+
+    sel = questionary.select(
+        "Select a video source",
+        style=QS,
+        choices=choices,
+        instruction="↑/↓ select · Enter confirm · Esc back"
+    ).ask()
+    if not sel or sel == BACK:
+        return None
+    if sel == "Auto (best)":
+        return resolve_best_mirror(ep)
+    idx = int(sel.split(".")[0]) - 1
+    return all_resolved[idx]
+
+
+
+def convert_m3u8_to_mp4(m3u8_url, out_path, referer=None):
+    """Fast m3u8 → mp4 remux using ffmpeg with -c copy (no re-encoding)."""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-fflags", "+discardcorrupt",
+            "-i", m3u8_url,
+            "-c", "copy",
+            "-bsf:a", "aac_adtstoasc",
+            "-movflags", "+faststart",
+            str(out_path),
+        ]
+        if referer:
+            cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                   "-fflags", "+discardcorrupt",
+                   "-headers", f"Referer: {referer}\r\n",
+                   "-i", m3u8_url, "-c", "copy", "-bsf:a", "aac_adtstoasc",
+                   "-movflags", "+faststart", str(out_path)]
+        try:
+            subprocess.run(cmd, check=True, timeout=600)
+            if out_path.exists() and out_path.stat().st_size > 0:
+                return out_path
+        except Exception:
+            pass
+
+    yt = shutil.which("yt-dlp")
+    if yt:
+        try:
+            subprocess.run([yt, "-o", str(out_path), "--no-playlist", "--no-progress",
+                            "--remux-video", "mp4", m3u8_url],
+                           check=True, timeout=600)
+            if out_path.exists() and out_path.stat().st_size > 0:
+                return out_path
+        except Exception:
+            pass
+
+    return None
+
+
+
+def sanitize(name):
+    return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+
+

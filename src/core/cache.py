@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 from bs4 import BeautifulSoup
-
 from .config import (
     CATALOG_FILE,
     CATALOG_REMOTE_URL,
@@ -269,6 +268,7 @@ def merge_into_catalog(as_entries, vr_entries):
             merged.append(entry)
 
     return merged
+
 
 def save_catalog(data):
     DATA_DIR.mkdir(parents=True, exist_ok=True)

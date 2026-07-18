@@ -9,7 +9,11 @@ data/active_domain.txt
 # Downloads folder
 downloads/
 
+# API (repo separate: github.com/6sfy/anisama-api)
+api/
+
 # Python
+
 __pycache__/
 *.py[cod]
 *$py.class

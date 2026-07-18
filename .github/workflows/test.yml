@@ -1,0 +1,80 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: install deps
+      run: pip install -e .
+
+    - name: import check
+      run: |
+        python -c "from src.scraper import fa_search, fa_get_episodes, fr_search, get_anime_seasons, get_episodes; print('scraper ok')"
+        python -c "from src.cache import load_catalog, download_combined_catalog, _fa_download_catalog, _fr_fetch_api_catalog, _merge_source_entries; print('cache ok')"
+        python -c "from src.search import search_combined; print('search ok')"
+        python -c "from src.main import cli; print('main ok')"
+        python -c "from src.config import FA_BASE, FR_API; print('config ok')"
+
+    - name: catalog load test
+      run: |
+        python -c "
+        import sys, json
+        sys.path.insert(0, '.')
+        with open('data/catalog.json', encoding='utf-8') as f:
+            data = json.load(f)
+        assert len(data) > 100, f'catalog too small: {len(data)}'
+        fa = [e for e in data if 'french-anime' in e.get('alt_source',[]) or e.get('source')=='french-anime']
+        fr = [e for e in data if 'franime' in e.get('alt_source',[]) or e.get('source')=='franime']
+        print(f'catalog: {len(data)} entries | FA: {len(fa)} | FR: {len(fr)}')
+        "
+
+    - name: live scrape tests (french-anime)
+      run: |
+        python -c "
+        import sys
+        sys.path.insert(0, '.')
+        from src.scraper import fa_search, fa_get_episodes
+
+        r = fa_search('naruto')
+        assert len(r) > 0, 'fa_search returned nothing'
+        print(f'fa_search naruto: {len(r)} results')
+
+        url = r[0]['link']
+        eps = fa_get_episodes(url)
+        assert len(eps) > 0, 'fa_get_episodes empty'
+        m = eps[0].get('mirrors', {})
+        assert len(m) > 0, 'no mirrors'
+        print(f'fa_get_episodes: {len(eps)} eps, {len(m)} mirrors')
+        "
+
+    - name: live scrape tests (franime)
+      run: |
+        python -c "
+        import sys
+        sys.path.insert(0, '.')
+        from src.scraper import fr_search, fr_get_seasons
+
+        r = fr_search('naruto')
+        assert len(r) > 0, 'fr_search returned nothing'
+        print(f'fr_search naruto: {len(r)} results')
+
+        s = fr_get_seasons(r[0]['link'])
+        assert len(s) > 0, 'fr_get_seasons empty'
+        print(f'fr_get_seasons: {len(s)}')
+        "

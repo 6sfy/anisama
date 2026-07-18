@@ -64,6 +64,14 @@ def find_active_domain():
 
     return None
 
+_SKIP_SEASON_KEYWORDS = {"scan", "manhwa", "webtoon", "manhua", "manga", "novel", "light novel", "ln"}
+
+
+def _is_anime_season(name: str) -> bool:
+    lower = name.lower()
+    return not any(kw in lower for kw in _SKIP_SEASON_KEYWORDS)
+
+
 def get_anime_seasons(url):
     client = get_client()
     r = client.get(url, headers=DEFAULT_HEADERS)
@@ -77,6 +85,8 @@ def get_anime_seasons(url):
             txt = re.sub(r'/\*.*?\*/', "", s.text, flags=re.DOTALL)
             for _, name, _, path in pat.findall(txt):
                 if name.lower() != "nom" and path.lower() != "url":
+                    if not _is_anime_season(name):
+                        continue
                     full = urljoin(url.rstrip("/") + "/", path).rstrip("/")
                     seasons.append({"name": name, "url": full})
     seen = set()

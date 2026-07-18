@@ -5,15 +5,16 @@
 
 > [!CAUTION]
 > **The use of this module under a different name on PyPI (or another source besides this GitHub) is not associated with this library.**
-> **anisama only streams from Anime-Sama and Voiranime. We are not responsible for any misuse.**
+> **anisama streams from Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix. We are not responsible for any misuse.**
 
 ## About
 
-<strong>Welcome to <code>anisama</code>, a Python CLI to browse, watch, and download anime from Anime-Sama and Voiranime (VOSTFR/VF).</strong>
+<strong>Welcome to <code>anisama</code>, a Python CLI + API server to browse, watch, and download anime from multiple sources (VOSTFR/VF).</strong>
 
-- anisama is directly inspired by [ani-cli](https://github.com/pystardust/ani-cli), the original shell-based anime streaming tool. While ani-cli focuses on a lightweight shell experience, anisama brings the same idea to Python with a richer interactive TUI and broader Windows support.
-- It scrapes Anime-Sama and Voiranime to search, stream, and download anime episodes directly from your terminal.
-- The interactive TUI is built with [Rich](https://github.com/Textualize/rich) and [Questionary](https://github.com/tmbo/questionary): clean headers and native arrow-key navigation.
+- Inspired by [ani-cli](https://github.com/pystardust/ani-cli), the original shell-based anime streaming tool.
+- Scrapes 6 sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix.
+- Interactive TUI built with [Rich](https://github.com/Textualize/rich) and [Questionary](https://github.com/tmbo/questionary).
+- Optional API server for remote access and integration.
 
 <div align="center">
   <p>
@@ -24,38 +25,55 @@
   </p>
 </div>
 
-> [!WARNING]
-> **anisama scrapes Anime-Sama and Voiranime. The availability of content depends on the source websites. Use responsibly.**
+## Project Structure
 
-> [!CAUTION]
-> **Streaming/downloading copyrighted content may be illegal in your country. Check your local laws before using this tool.**
-
-### <strong>[GitHub](https://github.com/6sfy/anisama)</strong>
-
-### <strong>[Report Issue](https://github.com/6sfy/anisama/issues)</strong>
+```
+anisama/
+├── src/                    # CLI application
+│   ├── __init__.py
+│   ├── __main__.py
+│   ├── core/               # Backend logic
+│   │   ├── config.py       # Constants, headers, domains
+│   │   ├── cache.py        # Catalog, settings, history
+│   │   ├── scraper.py      # Anime-Sama + Voiranime scraping
+│   │   ├── resolver.py     # Video URL extraction per host
+│   │   └── search.py       # Fuzzy search, scoring, dedup
+│   ├── cli/                # CLI-specific code
+│   │   ├── app.py          # Entry point, click command
+│   │   ├── display.py      # Banner, colors, info panels
+│   │   ├── player.py       # Player detection, play/download
+│   │   ├── picker.py       # Selection menus
+│   │   ├── mirror.py       # Speed tests, mirror resolution
+│   │   ├── install.py      # yt-dlp/ffmpeg install guides
+│   │   ├── settings.py     # Settings menu
+│   │   └── workflow.py     # Main workflow (search, play, download)
+│   └── api/                # Remote API client
+│       └── client.py       # Wrapper for anisama.sexcaller.lol
+├── api/                    # API server (repo séparé: 6sfy/anisama-api)
+└── data/                   # Local catalog/settings storage
+```
 
 ## Features
 
-- [x] Search anime by title with fuzzy matching across alt titles
+- [x] Search anime by title with fuzzy matching (rapidfuzz) across 6 sources
+- [x] Multi-source merge: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix
+- [x] Intelligent dedup: season/lang variants grouped under one result
+- [x] Smart search: exact match shows only relevant results, broad queries show variants
 - [x] Browse seasons (VOSTFR / VF)
 - [x] Stream episodes in your preferred video player
 - [x] Download episodes directly
-- [x] Episode range support
-- [x] Multiple video mirrors with automatic fallback
+- [x] Episode range support (1-5 or 1,3,5)
+- [x] Multiple video mirrors with automatic speed-tested fallback
 - [x] Player support: mpv, VLC, IINA, MoonPlayer, ImPlay
-- [x] Smart catalog: auto-updates
-- [x] Dual-source catalog merging (Anime-Sama + Voiranime)
+- [x] Smart catalog with GitHub seeding + incremental updates
 - [x] "Continue watching" history menu
-- [x] Clean interactive TUI with keyboard navigation
 - [x] AniList-powered info panel (score, status, episodes, studios, tags, synopsis)
 - [x] Prefer MP4 sources over HLS/m3u8 for faster playback
-- [x] Automatic m3u8 → mp4 conversion for downloads (via ffmpeg or yt-dlp)
+- [x] Automatic m3u8 → mp4 conversion for downloads
+- [x] REST API server (multi-source, SQLite-backed)
 - [ ] More sources / languages
 
 ## Installation
-
-> [!NOTE]
-> **Python 3.10 or newer is required**
 
 ### From PyPI (recommended)
 
@@ -71,17 +89,21 @@ cd anisama
 pip install -e .
 ```
 
+### API server
+
+```sh-session
+cd api
+pip install -r requirements.txt
+python run.py
+```
+
 ## Usage
 
-### Interactive mode
-
-Just run `anisama` without arguments to use the interactive TUI:
+### CLI interactive mode
 
 ```sh-session
 anisama
 ```
-
-Use the arrow keys to navigate menus, Enter to confirm, and Esc to go back.
 
 ### CLI mode
 
@@ -107,66 +129,37 @@ anisama -p vlc "berserk"
 | `--version` | Show version |
 | `-h, --help` | Show help |
 
-### Settings
+### API endpoints
 
-Run `anisama` and choose **Settings**, or edit `data/settings.json`:
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/v2/search?q=QUERY` | Search anime across all sources |
+| `GET /api/v2/catalog` | Full catalog with source/pagination filters |
+| `GET /api/v2/episodes?source=SOURCE&slug=SLUG` | Episode list for an anime |
+| `GET /api/v2/resolve?url=URL` | Resolve a video URL |
+| `GET /api/v2/resolve-episode` | Resolve one episode |
+| `GET /api/v2/sources` | Available sources with counts |
+| `GET /api/v2/stats` | Catalog statistics |
+| `GET /api/v2/info?title=TITLE` | AniList info |
+| `GET /player?url=URL` | Video player page |
 
-| Setting | Description |
-|---------|-------------|
-| `lang` | Default language: `vostfr`, `vf`, or `None` |
-| `player` | Default player: `mpv`, `vlc`, `iina`, `moonplayer`, `implay`, or `Auto` |
-| `auto_update` | Automatically refresh the catalog when stale |
-| `auto_fetch_github` | Download the remote GitHub catalog first |
-| `auto_fetch_new` | Scrape new Anime-Sama/Voiranime entries locally |
-| `download_dir` | Directory for downloaded episodes |
-| `auto_next` | Automatically play the next episode |
-| `default_download` | Default to download mode instead of streaming |
-| `max_results` | Maximum number of search results returned |
-| `cache_hours` | Catalog cache lifetime in hours |
-| `preferred_hosts` | Comma-separated mirror priority list |
-| `keep_open` | Keep the player open after the video ends |
-| `prefer_mp4` | Prefer MP4 files over HLS/m3u8 streams |
-| `auto_convert_mp4` | Convert HLS downloads to MP4 automatically |
-| `proxy` | HTTP/HTTPS proxy (e.g. `http://127.0.0.1:8080`) |
+## Sources
 
-## Example
-
-```python
-# anisama is a CLI tool — run it from your terminal
-# anisama "death note"
-# anisama "fullmetal alchemist" -e 1-10
-```
-
-## Video sources
-
-anisama resolves multiple video mirrors per episode and automatically prefers MP4 files when possible, because MP4 starts faster than HLS/m3u8 streams.
-
-When downloading an episode that only resolves to an m3u8 stream, anisama attempts to convert it to MP4 in the background using `ffmpeg` (preferred) or `yt-dlp` (fallback). If neither is installed, the raw stream is downloaded as-is.\n\nEnable **Auto-convert downloads to MP4** in Settings for fully automatic conversion. The first time you enable it, anisama will offer to install `ffmpeg` for you, or show platform-specific install instructions. The conversion uses `-c copy`, so it is as fast as your internet connection and does not re-encode the video.
-
-## Keyboard shortcuts
-
-| Key | Action |
-|-----|--------|
-| ↑ / ↓ | Navigate choices |
-| Enter | Confirm selection |
-| Esc | Go back / cancel |
-| Ctrl+C | Quit |
+| Source | Language | Method |
+|--------|----------|--------|
+| [Anime-Sama](https://anime-sama.to) | VOSTFR/VF | HTML scraping |
+| [Voiranime](https://voiranime.rip) | VOSTFR/VF | HTML scraping |
+| [MyFluneo](https://myfluneo.eu) | VOSTFR | Playwright |
+| [AnimesUltra](https://ww.animesultra.org) | VOSTFR/VF | Sitemap/HTML |
+| [French-Anime](https://french-anime.com) | VOSTFR/VF | HTML scraping |
+| [AnimoFlix](https://animoflix.to) | VOSTFR | HTML + Playwright |
 
 ## Contributing
 
 - Before creating an issue, please ensure that it hasn't already been reported/suggested.
 - See [the contribution guide](https://github.com/6sfy/anisama/blob/main/CONTRIBUTING.md) if you'd like to submit a PR.
 
-## Need help?
-
-GitHub Issues: [Here](https://github.com/6sfy/anisama/issues)
-
 ## Credits
 
 - [pystardust/ani-cli](https://github.com/pystardust/ani-cli) for the original idea and workflow
-- [Anime-Sama](https://anime-sama.to) for the primary content
-- [Voiranime](https://voiranime.rip) for the secondary source
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=6sfy/anisama&type=Date)](https://star-history.com/#6sfy/anisama&Date)
+- Content sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix
