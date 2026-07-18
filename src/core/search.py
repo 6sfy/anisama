@@ -38,9 +38,12 @@ def _norm_title(t):
 
 
 def strip_id_prefix(t):
+    if not t:
+        return t
     m = re.match(r"^\d+\s+(.+)", t)
     if m and re.search(r"\b(Vf|Vostfr|VO|VF|VOSTFR|VO)\b", m.group(1)):
-        return m.group(1)
+        t = m.group(1)
+    t = re.sub(r"\s+(Vf|Vostfr|VO|VF|VOSTFR|VO)\s*$", "", t)
     return t
 
 
