@@ -10,7 +10,7 @@ data/active_domain.txt
 downloads/
 
 # API (repo separate: github.com/6sfy/anisama-api)
-api/
+/api/
 
 # Python
 
