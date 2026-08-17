@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import time
+import urllib.error
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
@@ -19,12 +21,22 @@ def _clean(t):
     return t
 
 
-def _get(path):
+def _get(path, _retries=2):
     url = f"{API_BASE}{path}"
     req = Request(url, headers={"User-Agent": "anisama-cli/2.1.0"})
     try:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 429 and _retries > 0:
+            retry_after = 1
+            try:
+                retry_after = int(e.headers.get("Retry-After", "1"))
+            except (TypeError, ValueError):
+                pass
+            time.sleep(min(retry_after, 5))
+            return _get(path, _retries - 1)
+        raise Exception(f"API error ({url}): {e}")
     except Exception as e:
         raise Exception(f"API error ({url}): {e}")
 
