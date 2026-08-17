@@ -35,7 +35,7 @@ def _clean(t):
 
 def _get(path, _retries=2):
     url = f"{API_BASE}{path}"
-    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.2"})
+    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.3"})
     try:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
@@ -75,6 +75,29 @@ def resolve_episode(source, slug, num):
     return data.get("url"), data.get("type", "mp4"), data.get("referer", "")
 
 
+def submit_resolution(source, slug, num, url, rtype, referer=""):
+    """POST a locally-resolved URL to the API so it can serve it instantly later."""
+    body = json.dumps({
+        "source": source,
+        "slug": slug,
+        "num": num,
+        "url": url,
+        "type": rtype,
+        "referer": referer,
+    }).encode()
+    req = Request(
+        f"{API_BASE}/api/v2/resolve-episode",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "anisama-cli/2.1.3",
+        },
+        method="POST",
+    )
+    with urlopen(req, timeout=5) as resp:
+        return resp.status
+
+
 def get_sources():
     data = _get("/api/v2/sources")
     return data.get("sources", [])
@@ -91,7 +114,7 @@ def get_anime_info(title):
 def fetch_catalog_count(api_base=None):
     base = api_base or API_BASE
     try:
-        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.1.2"}), timeout=5)
+        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.1.3"}), timeout=5)
         data = json.loads(r.read().decode())
         return data.get("total", 0)
     except Exception:

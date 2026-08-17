@@ -283,39 +283,75 @@ def voiranime_download(eps, nums, title, lang, quiet, dl_dir="downloads", url_or
             cache.add_history(title, url_orig, "voiranime", n, season_url=season_url, season_name=season_name)
 
 
+def _report_local_resolution(source, slug, n, r):
+    """Tell the API we resolved locally, so it can serve this instantly next time."""
+    try:
+        api_client.submit_resolution(
+            source, slug, n,
+            r.get("url", ""), r.get("type", "raw"), r.get("referer", ""),
+        )
+    except Exception:
+        pass
+
+
 def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="anime-sama", slug=""):
     if not quiet:
         console.print(f"\n[{ST['sel']}]Episode {n}:[/{ST['sel']}] Resolving video URL...")
 
-    api_r = None
-    try:
-        url, rtype, ref = api_client.resolve_episode(source, slug, n)
-        if url:
-            api_r = {"url": url, "type": rtype, "referer": ref}
-    except Exception:
-        pass
+    box = {"winner": None}
+    lock = threading.Lock()
+    done = threading.Event()
 
-    if prefer_mp4:
-        fast = resolve_best_mirror(e, prefer_mp4=True)
-        if fast and fast.get("type") in ("mp4", "webm"):
+    def _win(tag, r):
+        with lock:
+            if box["winner"] is None:
+                box["winner"] = (tag, r)
+                done.set()
+
+    def _api_worker():
+        try:
+            url, rtype, ref = api_client.resolve_episode(source, slug, n)
+            if url:
+                _win("api", {"url": url, "type": rtype, "referer": ref})
+        except Exception:
+            pass
+
+    def _local_worker():
+        try:
+            r = resolve_best_mirror(e, prefer_mp4=prefer_mp4)
+            if r:
+                _win("local", r)
+        except Exception:
+            pass
+
+    workers = [threading.Thread(target=_api_worker, daemon=True)]
+    if e and e.get("mirrors"):
+        workers.append(threading.Thread(target=_local_worker, daemon=True))
+    for w in workers:
+        w.start()
+
+    done.wait(timeout=25)
+    winner = box["winner"]
+
+    if winner:
+        tag, r = winner
+        if tag == "local":
+            _report_local_resolution(source, slug, n, r)
             if not quiet:
-                ok(f"Best source: {fast.get('type','raw').upper()} from {urlparse(fast['url']).netloc}")
-            return fast
+                ok(f"Resolved locally: {r.get('type','raw').upper()} from {urlparse(r['url']).netloc}")
+        elif not quiet:
+            ok(f"Resolved via API: {r.get('type','raw').upper()} from {urlparse(r['url']).netloc}")
+        return r
 
     local_r = pick_fastest_mirror(e, prefer_mp4=prefer_mp4, test_speed=True, quiet=quiet)
-
-    if not local_r and not api_r:
-        err(f"Failed to resolve episode {n}.")
-        return None
-
-    if api_r and (not local_r or api_r["type"] in ("mp4", "webm")):
+    if local_r:
+        _report_local_resolution(source, slug, n, local_r)
         if not quiet:
-            ok(f"Resolved via API: {api_r['type'].upper()} from {urlparse(api_r['url']).netloc}")
-        return api_r
+            ok(f"Best source: {local_r.get('type','raw').upper()} from {urlparse(local_r['url']).netloc}")
+        return local_r
 
-    if not quiet:
-        ok(f"Best source: {local_r.get('type','raw').upper()} from {urlparse(local_r['url']).netloc}")
-    return local_r
+    err(f"Failed to resolve episode {n}.")
+    return None
 
 
 def download_eps(eps, nums, title, quiet, dl_dir="downloads", anime_link="", season_url=None, season_name=None):
