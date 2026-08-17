@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anisama"
+version = "2.0.0"
+description = "Anisama — multi-source anime scraping, search, resolution, and CLI"
+authors = [{name = "6sfy"}]
+readme = "README.md"
+license = "GPL-3.0-or-later"
+keywords = ["anime", "cli", "anime-sama", "streaming", "downloader", "scraping"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "httpx[http2]>=0.28.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "rapidfuzz>=3.0.0",
+    "click>=8.1.0",
+    "questionary>=2.0.0",
+    "rich>=13.0.0",
+    "requests>=2.31.0",
+]
+[project.optional-dependencies]
+playwright = ["playwright>=1.40.0"]
+dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0", "pytest-mock>=3.12.0", "ruff>=0.5.0"]
+all = ["anisama[playwright,dev]"]
+[project.urls]
+Repository = "https://github.com/6sfy/anisama"
+[project.scripts]
+anisama = "anisama.cli.app:main"
+
+[tool.setuptools]
+package-dir = { "anisama" = "src" }
+packages = ["anisama", "anisama.cli", "anisama.scraper"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+[tool.ruff]
+target-version = "py310"
+line-length = 120
