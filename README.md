@@ -5,22 +5,22 @@
 
 > [!CAUTION]
 > **The use of this module under a different name on PyPI (or another source besides this GitHub) is not associated with this library.**
-> **anisama scrapes from Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix. We are not responsible for any misuse.**
+> **anisama streams from Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix. We are not responsible for any misuse.**
 
 ## About
 
-<strong>Welcome to <code>anisama</code>, a Python library + CLI for multi-source anime scraping, search, and video resolution.</strong>
+<strong>Welcome to <code>anisama</code>, a Python CLI to browse, watch, and download anime from multiple sources (VOSTFR/VF).</strong>
 
+- Inspired by [ani-cli](https://github.com/pystardust/ani-cli), the original shell-based anime streaming tool.
 - Scrapes 6 sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix.
-- Fuzzy search with rapidfuzz across all sources with intelligent dedup.
-- Video URL resolution for 10+ hosting providers.
-- Unified source registry for use by CLI and API frontends.
-- Built-in interactive CLI (click + questionary + rich) — `anisama "demon slayer"`
+- Interactive TUI built with Rich and Questionary.
+- Connects to the anisama API for fast search and video resolution.
 
 <div align="center">
   <p>
     <a href="https://pypi.org/project/anisama/"><img src="https://img.shields.io/pypi/v/anisama" alt="PyPI version" /></a>
     <a href="https://pypi.org/project/anisama/"><img src="https://img.shields.io/pypi/dm/anisama" alt="PyPI downloads" /></a>
+    <a href="https://github.com/6sfy/anisama/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/6sfy/anisama/test.yml?branch=master" alt="Tests status" /></a>
     <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python version" /></a>
   </p>
 </div>
@@ -29,40 +29,55 @@
 
 ```
 anisama/
-├── src/
-│   ├── __init__.py               # Version and top-level exports
-│   ├── config.py                 # Constants, headers, domains, paths
-│   ├── cache.py                  # Catalog CRUD, multi-source merge
-│   ├── search.py                 # Fuzzy search (rapidfuzz)
-│   ├── http_client.py            # Shared httpx.Client singleton (HTTP/2)
-│   ├── resolver.py               # Video URL resolution per host
-│   ├── sources.py                # Source registry + unified API
-│   ├── exceptions.py             # Custom exceptions
-│   ├── scraper/
-│   │   ├── __init__.py           # Re-exports all scrapers
-│   │   ├── base.py               # Shared helpers, domain discovery
-│   │   ├── anime_sama.py         # Anime-Sama scraper
-│   │   ├── voiranime.py          # Voiranime scraper
-│   │   ├── myfluneo.py           # MyFluneo scraper (Playwright)
-│   │   ├── animesultra.py        # AnimesUltra scraper
-│   │   ├── frenchanime.py        # FrenchAnime scraper
-│   │   └── animoflix.py          # AnimoFlix scraper (Playwright)
-│   └── cli/
-│       ├── __init__.py
-│       ├── app.py                # Click entry point & main menu
-│       ├── display.py            # Rich console, banners, panels
-│       ├── workflow.py           # Search → pick → play workflow
-│       ├── picker.py             # Episode & mirror selection
-│       ├── player.py             # Video player launcher (mpv/vlc/…)
-│       ├── settings.py           # Settings menu (lang, player, proxy)
-│       ├── config.py             # CLI-specific config helpers
-│       ├── install.py            # Dependency installer
-│       ├── mirror.py             # Mirror selection logic
-│       └── api_client.py         # Optional API backend client
-├── data/                       # Local catalog/settings storage
-├── tests/                      # Pytest suite (125+ tests)
+├── src/                       # Library package (installed as `anisama`)
+│   ├── __init__.py            # Version and top-level exports
+│   ├── config.py              # Constants, headers, domains, paths
+│   ├── cache.py               # Catalog CRUD, multi-source merge
+│   ├── search.py              # Fuzzy search (rapidfuzz)
+│   ├── http_client.py         # Shared httpx.Client singleton (HTTP/2)
+│   ├── resolver.py            # Video URL resolution per host
+│   ├── sources.py             # Source registry + unified API
+│   ├── exceptions.py          # Custom exceptions
+│   ├── scraper/               # Per-source scrapers
+│   │   ├── base.py            # Shared helpers, domain discovery
+│   │   ├── anime_sama.py      # Anime-Sama scraper
+│   │   ├── voiranime.py       # Voiranime scraper
+│   │   ├── myfluneo.py        # MyFluneo scraper (Playwright)
+│   │   ├── animesultra.py     # AnimesUltra scraper
+│   │   ├── frenchanime.py     # FrenchAnime scraper
+│   │   └── animoflix.py       # AnimoFlix scraper (Playwright)
+│   └── cli/                   # CLI-specific code
+│       ├── app.py             # Entry point, click command
+│       ├── display.py         # Banner, colors, info panels
+│       ├── workflow.py        # Main workflow (search, play, download)
+│       ├── picker.py          # Selection menus
+│       ├── player.py          # Player detection, play/download
+│       ├── mirror.py          # Speed tests, mirror resolution
+│       ├── install.py         # yt-dlp/ffmpeg install guides
+│       ├── settings.py        # Settings menu
+│       └── api_client.py      # Remote anisama API client
+├── data/                      # Local catalog/settings storage
+├── tests/                     # Pytest suite
 └── pyproject.toml
 ```
+
+## Features
+
+- Search anime by title with fuzzy matching (rapidfuzz) across 6 sources
+- Multi-source merge: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix
+- Intelligent dedup: season/lang variants grouped under one result
+- Smart search: exact match shows only relevant results, broad queries show variants
+- Browse seasons (VOSTFR / VF)
+- Stream episodes in your preferred video player
+- Download episodes directly
+- Episode range support (1-5 or 1,3,5)
+- Multiple video mirrors with automatic speed-tested fallback
+- Player support: mpv, VLC, IINA, MoonPlayer, ImPlay
+- API-first resolve with local fallback
+- "Continue watching" history menu
+- AniList-powered info panel (score, status, episodes, studios, tags, synopsis)
+- Prefer MP4 sources over HLS/m3u8 for faster playback
+- Automatic m3u8 → mp4 conversion for downloads
 
 ## Installation
 
@@ -89,21 +104,42 @@ pip install -e .
 
 ## Usage
 
-### As a CLI tool
+### Interactive mode
 
 ```sh-session
-# Interactive mode (launches menu)
 anisama
-
-# Search and play
-anisama "demon slayer"
-anisama --lang vf "attack on titan"
-anisama --download "one piece"
-anisama -e 1-5 "naruto"
-
-# Settings
-anisama --settings
 ```
+
+### CLI mode
+
+```sh-session
+anisama "demon slayer"
+anisama "one piece" -e 1-5
+anisama "attack on titan" -e 1,3,5 --lang vf
+anisama "jujutsu kaisen" -d -e 1
+anisama -p vlc "berserk"
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--lang vostfr/vf` | Language filter |
+| `--dub` | Shorthand for VF |
+| `-d, --download` | Download instead of streaming |
+| `-e, --episodes` | Episode range: `5`, `1-5`, or `1,3,5` |
+| `-p, --player` | Player: mpv, vlc, iina, moonplayer, implay |
+| `-U, --update` | Force refresh the anime catalog |
+| `-s, --settings` | Open settings menu |
+| `-q, --quiet` | Reduce output verbosity |
+| `--version` | Show version |
+| `-h, --help` | Show help |
+
+## API
+
+anisama uses a centralized API for fast search and video resolution. The API server source is available at [github.com/6sfy/anisama-api](https://github.com/6sfy/anisama-api).
+
+The API base URL defaults to `https://anisama.sexcaller.lol` and can be overridden with the `ANISAMA_API` environment variable.
 
 ### As a library
 
@@ -137,6 +173,7 @@ for name, source in SOURCES.items():
 
 ### Configuration
 
+- `ANISAMA_API` — Override the API base URL (default: `https://anisama.sexcaller.lol`)
 - `ANISAMA_DATA_DIR` — Override the data directory (default: `<project_root>/data`)
 - `ANISAMA_PLAYWRIGHT_EXECUTABLE_PATH` — Path to Playwright Chromium executable
 
@@ -154,7 +191,7 @@ for name, source in SOURCES.items():
 ## Contributing
 
 - Before creating an issue, please ensure that it hasn't already been reported/suggested.
-- See [the contribution guide](https://github.com/6sfy/anisama/blob/main/CONTRIBUTING.md) if you'd like to submit a PR.
+- See [the contribution guide](https://github.com/6sfy/anisama/blob/master/CONTRIBUTING.md) if you'd like to submit a PR.
 
 ## Credits
 
