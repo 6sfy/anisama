@@ -492,6 +492,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "proxy": "",
     "prefer_mp4": True,
     "auto_convert_mp4": True,
+    "api_url": "https://anisama.sexcaller.lol",
 }
 
 

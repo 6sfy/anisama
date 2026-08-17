@@ -6,6 +6,7 @@ from anisama import cache
 from .display import console, ST, QS, section_header, ok, note, err
 from .install import check_ffmpeg, install_ffmpeg_interactive, explain_auto_convert
 from .picker import BACK
+from .api_client import DEFAULT_API_URL
 
 
 def settings_menu():
@@ -26,6 +27,7 @@ def settings_menu():
             f"Keep player open: {'Yes' if s.get('keep_open', True) else 'No'}",
             f"Prefer MP4 over HLS: {'Yes' if s.get('prefer_mp4', True) else 'No'}",
             f"Auto-convert downloads to MP4: {'Yes' if s.get('auto_convert_mp4', True) else 'No'}",
+            f"API URL: {s.get('api_url') or 'Default'}",
             f"Proxy: {s.get('proxy', '') or 'None'}",
             BACK,
         ]
@@ -85,6 +87,25 @@ def settings_menu():
                 if not check_ffmpeg():
                     install_ffmpeg_interactive()
                 explain_auto_convert()
+        elif sel.startswith("API URL"):
+            current = s.get("api_url") or ""
+            v = questionary.text(
+                "API URL (https://... — 'Default' to reset):",
+                style=QS,
+                default=current,
+            ).ask()
+            if v is not None:
+                v = v.strip().rstrip("/")
+                if v.lower() == "default":
+                    s["api_url"] = DEFAULT_API_URL
+                elif v and v.startswith(("http://", "https://")):
+                    s["api_url"] = v
+                elif not v:
+                    s["api_url"] = DEFAULT_API_URL
+                else:
+                    err("Invalid URL (must start with http:// or https://)")
+            if v is not None and s.get("api_url"):
+                note("Applied on next launch")
         elif sel.startswith("Proxy"):
             v = questionary.text("Proxy (e.g. http://127.0.0.1:8080):", style=QS, default=s.get("proxy", "")).ask()
             if v is not None:

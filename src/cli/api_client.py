@@ -8,7 +8,19 @@ import urllib.error
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
-API_BASE = os.environ.get("ANISAMA_API", "https://anisama.sexcaller.lol").rstrip("/")
+from anisama import cache as cache_mod
+
+DEFAULT_API_URL = "https://anisama.sexcaller.lol"
+
+
+def _default_api_base():
+    try:
+        return (cache_mod.load_settings().get("api_url") or "").strip().rstrip("/")
+    except Exception:
+        return ""
+
+
+API_BASE = (os.environ.get("ANISAMA_API") or _default_api_base() or DEFAULT_API_URL).rstrip("/")
 
 
 def _clean(t):
@@ -23,7 +35,7 @@ def _clean(t):
 
 def _get(path, _retries=2):
     url = f"{API_BASE}{path}"
-    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.1"})
+    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.2"})
     try:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
@@ -79,7 +91,7 @@ def get_anime_info(title):
 def fetch_catalog_count(api_base=None):
     base = api_base or API_BASE
     try:
-        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.0.0"}), timeout=5)
+        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.1.2"}), timeout=5)
         data = json.loads(r.read().decode())
         return data.get("total", 0)
     except Exception:
