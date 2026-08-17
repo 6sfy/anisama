@@ -8,6 +8,42 @@ from pathlib import Path
 
 from .config import PLAYER_PATHS
 
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _fetch_headers(referer=None):
+    headers = {"User-Agent": BROWSER_UA}
+    if referer:
+        headers["Referer"] = referer
+    return headers
+
+
+def stream_is_alive(url, rtype="mp4", referer=None, timeout=8):
+    """Lightweight liveness check before handing a URL to a player."""
+    import httpx
+
+    headers = _fetch_headers(referer)
+    try:
+        if rtype == "m3u8":
+            r = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+            if r.status_code != 200:
+                return False
+            body = r.content[:1024].lower()
+            ctype = r.headers.get("content-type", "").lower()
+            return b"#extm3u" in body or "mpegurl" in ctype
+        r = httpx.head(url, headers=headers, timeout=timeout, follow_redirects=True)
+        if r.status_code in (200, 206):
+            return True
+        if r.status_code == 405:
+            r = httpx.get(url, headers={**headers, "Range": "bytes=0-0"}, timeout=timeout, follow_redirects=True)
+            return r.status_code in (200, 206, 416)
+        return False
+    except Exception:
+        return False
+
 
 def find_player(name):
     sys_name = platform.system()
@@ -64,7 +100,7 @@ def play_url(url, path, referer=None, keep_open=True):
                 if keep_open:
                     cmd += ["--keep-open"]
             if referer and ("mpv" in base or "implay" in base):
-                cmd += [f"--http-header-fields=Referer: {referer}"]
+                cmd += [f"--http-header-fields=Referer: {referer}", f"--http-header-fields=User-Agent: {BROWSER_UA}"]
             cmd.append(url)
             subprocess.Popen(cmd, shell=False)
         elif sys_name == "Darwin":
@@ -76,17 +112,18 @@ def play_url(url, path, referer=None, keep_open=True):
         Console().print(f"[red]Error launching player:[/red] {e}")
 
 
-def download_url(url, out_dir, fname, use_ytdlp=True):
+def download_url(url, out_dir, fname, use_ytdlp=True, referer=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / fname
 
     if use_ytdlp:
         yt = shutil.which("yt-dlp")
         if yt:
-            subprocess.run(
-                [yt, "-o", str(out), "--no-playlist", "--no-progress", url],
-                check=False,
-            )
+            args = [yt, "-o", str(out), "--no-playlist", "--no-progress", "--add-header", f"User-Agent: {BROWSER_UA}"]
+            if referer:
+                args += ["--add-header", f"Referer: {referer}"]
+            args.append(url)
+            subprocess.run(args, check=False)
             if out.exists():
                 return out
 
@@ -94,7 +131,7 @@ def download_url(url, out_dir, fname, use_ytdlp=True):
     from rich.console import Console
 
     c = Console()
-    r = requests.get(url, stream=True, timeout=30)
+    r = requests.get(url, stream=True, timeout=30, headers=_fetch_headers(referer))
     r.raise_for_status()
     total = int(r.headers.get("content-length", 0))
     with open(out, "wb") as f:

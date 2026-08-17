@@ -35,7 +35,7 @@ def _clean(t):
 
 def _get(path, _retries=2):
     url = f"{API_BASE}{path}"
-    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.3"})
+    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.4"})
     try:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
@@ -70,8 +70,11 @@ def get_episodes(source, slug, url=""):
     return data.get("episodes", []), data.get("total", 0)
 
 
-def resolve_episode(source, slug, num):
-    data = _get(f"/api/v2/resolve-episode?source={quote(source)}&slug={quote(slug)}&num={num}")
+def resolve_episode(source, slug, num, fresh=False):
+    path = f"/api/v2/resolve-episode?source={quote(source)}&slug={quote(slug)}&num={num}"
+    if fresh:
+        path += "&fresh=1"
+    data = _get(path)
     return data.get("url"), data.get("type", "mp4"), data.get("referer", "")
 
 
@@ -90,7 +93,7 @@ def submit_resolution(source, slug, num, url, rtype, referer=""):
         data=body,
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "anisama-cli/2.1.3",
+            "User-Agent": "anisama-cli/2.1.4",
         },
         method="POST",
     )
@@ -114,7 +117,7 @@ def get_anime_info(title):
 def fetch_catalog_count(api_base=None):
     base = api_base or API_BASE
     try:
-        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.1.3"}), timeout=5)
+        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.1.4"}), timeout=5)
         data = json.loads(r.read().decode())
         return data.get("total", 0)
     except Exception:

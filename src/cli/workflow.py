@@ -294,7 +294,7 @@ def _report_local_resolution(source, slug, n, r):
         pass
 
 
-def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="anime-sama", slug=""):
+def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="anime-sama", slug="", fresh=False, check_alive=True):
     if not quiet:
         console.print(f"\n[{ST['sel']}]Episode {n}:[/{ST['sel']}] Resolving video URL...")
 
@@ -310,7 +310,7 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
 
     def _api_worker():
         try:
-            url, rtype, ref = api_client.resolve_episode(source, slug, n)
+            url, rtype, ref = api_client.resolve_episode(source, slug, n, fresh=fresh)
             if url:
                 _win("api", {"url": url, "type": rtype, "referer": ref})
         except Exception:
@@ -335,6 +335,15 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
 
     if winner:
         tag, r = winner
+        if check_alive and r.get("type") not in ("embed", "raw") and not player_mod.stream_is_alive(
+            r["url"], r.get("type", "mp4"), r.get("referer")
+        ):
+            if not quiet:
+                note("Resolved URL is dead (expired token), re-resolving fresh...")
+            return _resolve_episode(
+                e, n, quiet, prefer_mp4=prefer_mp4, allow_pick=allow_pick,
+                source=source, slug=slug, fresh=True, check_alive=False,
+            )
         if tag == "local":
             _report_local_resolution(source, slug, n, r)
             if not quiet:
