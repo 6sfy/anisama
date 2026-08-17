@@ -53,6 +53,12 @@ def format_speed(bps):
     return f"{bps} B/s"
 
 
+def _stream_is_alive(url, rtype="mp4", referer=None, timeout=8):
+    """Lightweight liveness check for a resolved video URL."""
+    from . import player as player_mod
+    return player_mod.stream_is_alive(url, rtype, referer, timeout=timeout)
+
+
 def pick_fastest_mirror(ep, prefer_mp4=True, test_speed=True, quiet=False):
     """Resolve all mirrors in parallel, optionally speed-test the best ones,
     and return the fastest playable source."""
@@ -107,54 +113,60 @@ def pick_fastest_mirror(ep, prefer_mp4=True, test_speed=True, quiet=False):
 
 
 def resolve_best_mirror(ep, prefer_mp4=True):
-    """Resolve a single best mirror. Prefers known hosts, then speed if possible."""
-    settings = cache.load_settings()
-    pref = settings.get("preferred_hosts", "")
-    if pref:
-        hosts = [h.strip() for h in pref.split(",") if h.strip()]
-    else:
-        hosts = PREF_HOSTS
-    mirrors = ep.get("mirrors", {})
-    if not mirrors:
+    """Resolve ALL mirrors in parallel, check liveness, and return the
+    best ALIVE source. No hard priority — all sources are tried equally.
+
+    Preference is only a SOFT tiebreaker among alive URLs:
+      mp4/webm > m3u8 > raw
+    """
+    candidates = resolve_all_mirrors(ep)
+    if not candidates:
         return None
 
-    def try_mirror(u, want_type=None):
-        r = resolve_episode_url(u)
-        if r and r.get("url"):
-            r["referer"] = u
-            if want_type and r.get("type") != want_type:
-                return None
-            return r
-        return None
+    if len(candidates) == 1:
+        c = candidates[0]
+        # Even a single candidate should be checked for liveness
+        if c.get("type") not in ("embed", "raw") and not _stream_is_alive(
+            c["url"], c.get("type", "mp4"), c.get("referer")
+        ):
+            return None
+        return c
 
-    if prefer_mp4:
-        mp4_hosts = [h for h in hosts if h in MP4_HOSTS] or MP4_HOSTS
-        for h in mp4_hosts:
-            for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
-                u = mirrors[k]
-                if h in u.lower():
-                    r = try_mirror(u, want_type="mp4")
-                    if r:
-                        return r
-        for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
-            u = mirrors[k]
-            r = try_mirror(u, want_type="mp4")
-            if r:
-                return r
+    type_rank = {"mp4": 0, "webm": 1, "m3u8": 2, "raw": 3}
 
-    for h in hosts:
-        for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
-            u = mirrors[k]
-            if h in u.lower():
-                r = try_mirror(u)
-                if r and r.get("type") != "raw":
-                    return r
+    # Sort by soft preference (mp4 > m3u8 > raw)
+    candidates.sort(key=lambda c: type_rank.get(c.get("type", "raw"), 3))
 
-    for k in sorted(mirrors.keys(), key=lambda x: int(x[3:])):
-        u = mirrors[k]
-        r = try_mirror(u)
-        if r:
-            return r
+    # Check liveness in parallel and return first alive one
+    # We check in preference order so the first alive = the best alive
+    alive_results = {}
+    dead_urls = set()
+
+    def _check_one(idx, c):
+        if c.get("type") in ("embed", "raw"):
+            alive_results[idx] = True
+            return
+        alive_results[idx] = _stream_is_alive(
+            c["url"], c.get("type", "mp4"), c.get("referer")
+        )
+        if not alive_results[idx]:
+            dead_urls.add(c["url"])
+
+    with ThreadPoolExecutor(max_workers=min(len(candidates), 4)) as ex:
+        futures = {ex.submit(_check_one, i, c): i for i, c in enumerate(candidates)}
+        for f in as_completed(futures):
+            try:
+                f.result(timeout=12)
+            except Exception:
+                idx = futures[f]
+                alive_results[idx] = False
+
+    # Return first alive candidate (already sorted by preference)
+    for i, c in enumerate(candidates):
+        if alive_results.get(i, False):
+            return c
+
+    # All dead — return None instead of a dead URL
     return None
 
 

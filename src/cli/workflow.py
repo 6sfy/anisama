@@ -294,7 +294,16 @@ def _report_local_resolution(source, slug, n, r):
         pass
 
 
-def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="anime-sama", slug="", fresh=False, check_alive=True):
+def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="anime-sama", slug="", fresh=False):
+    """Resolve an episode video URL by trying ALL mirrors in parallel.
+
+    No priority system — all sources are tried equally. The first ALIVE
+    URL wins, with soft preference for mp4 over m3u8 among alive URLs.
+
+    The API worker and local mirror worker race in parallel. The local
+    worker now uses resolve_best_mirror() which resolves all mirrors,
+    checks liveness, and returns only alive URLs.
+    """
     if not quiet:
         console.print(f"\n[{ST['sel']}]Episode {n}:[/{ST['sel']}] Resolving video URL...")
 
@@ -312,12 +321,19 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
         try:
             url, rtype, ref = api_client.resolve_episode(source, slug, n, fresh=fresh)
             if url:
+                # Verify API result is alive before accepting it
+                if rtype not in ("embed", "raw") and not player_mod.stream_is_alive(
+                    url, rtype, ref
+                ):
+                    return  # Dead URL from API — don't accept it
                 _win("api", {"url": url, "type": rtype, "referer": ref})
         except Exception:
             pass
 
     def _local_worker():
         try:
+            # resolve_best_mirror() now resolves ALL mirrors in parallel,
+            # checks liveness, and returns only alive URLs
             r = resolve_best_mirror(e, prefer_mp4=prefer_mp4)
             if r:
                 _win("local", r)
@@ -330,20 +346,11 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
     for w in workers:
         w.start()
 
-    done.wait(timeout=25)
+    done.wait(timeout=30)
     winner = box["winner"]
 
     if winner:
         tag, r = winner
-        if check_alive and r.get("type") not in ("embed", "raw") and not player_mod.stream_is_alive(
-            r["url"], r.get("type", "mp4"), r.get("referer")
-        ):
-            if not quiet:
-                note("Resolved URL is dead (expired token), re-resolving fresh...")
-            return _resolve_episode(
-                e, n, quiet, prefer_mp4=prefer_mp4, allow_pick=allow_pick,
-                source=source, slug=slug, fresh=True, check_alive=False,
-            )
         if tag == "local":
             _report_local_resolution(source, slug, n, r)
             if not quiet:
@@ -352,8 +359,19 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
             ok(f"Resolved via API: {r.get('type','raw').upper()} from {urlparse(r['url']).netloc}")
         return r
 
+    # Both workers failed or returned dead URLs — try full parallel resolve
+    # with speed testing as a last resort
+    if not quiet:
+        note("First resolution attempt returned no alive URLs, trying all mirrors...")
     local_r = pick_fastest_mirror(e, prefer_mp4=prefer_mp4, test_speed=True, quiet=quiet)
     if local_r:
+        # Verify this one is alive too
+        if local_r.get("type") not in ("embed", "raw") and not player_mod.stream_is_alive(
+            local_r["url"], local_r.get("type", "mp4"), local_r.get("referer")
+        ):
+            if not quiet:
+                err("All resolved URLs are dead (expired tokens).")
+            return None
         _report_local_resolution(source, slug, n, local_r)
         if not quiet:
             ok(f"Best source: {local_r.get('type','raw').upper()} from {urlparse(local_r['url']).netloc}")
