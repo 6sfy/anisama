@@ -19,9 +19,9 @@
 
 <div align="center">
   <p>
-    <a href="https://pypi.org/project/anisama/"><img anisama="https://img.shields.io/pypi/v/anisama" alt="PyPI version" /></a>
-    <a href="https://pypi.org/project/anisama/"><img anisama="https://img.shields.io/pypi/dm/anisama" alt="PyPI downloads" /></a>
-    <a href="https://python.org"><img anisama="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python version" /></a>
+    <a href="https://pypi.org/project/anisama/"><img src="https://img.shields.io/pypi/v/anisama" alt="PyPI version" /></a>
+    <a href="https://pypi.org/project/anisama/"><img src="https://img.shields.io/pypi/dm/anisama" alt="PyPI downloads" /></a>
+    <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python version" /></a>
   </p>
 </div>
 
