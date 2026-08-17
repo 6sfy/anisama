@@ -157,6 +157,26 @@ def _animoflix_resolve(url, **kwargs):
     return animoflix_resolve(url)
 
 
+def _franime_catalog(**kwargs):
+    from .scraper.franime import franime_catalog
+    return franime_catalog()
+
+
+def _franime_search(query, **kwargs):
+    from .scraper.franime import franime_search
+    return franime_search(query)
+
+
+def _franime_episodes(url, **kwargs):
+    from .scraper.franime import franime_episodes
+    return franime_episodes(url, season=kwargs.get("season", 1))
+
+
+def _franime_resolve(url, **kwargs):
+    from .scraper.franime import franime_resolve
+    return franime_resolve(url, lang=kwargs.get("lang", "vo"))
+
+
 SOURCES: dict[str, Source] = {
     "anime-sama": Source(
         name="anime-sama",
@@ -211,6 +231,15 @@ SOURCES: dict[str, Source] = {
         resolve=_animoflix_resolve,
         needs_playwright=True,
         description="AnimoFlix — VOSTFR source with Playwright fallback",
+    ),
+    "franime": Source(
+        name="franime",
+        catalog=_franime_catalog,
+        search=_franime_search,
+        episodes=_franime_episodes,
+        resolve=_franime_resolve,
+        needs_playwright=False,
+        description="Franime — VOSTFR/VF API-based source",
     ),
 }
 

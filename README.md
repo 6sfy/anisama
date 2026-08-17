@@ -5,14 +5,14 @@
 
 > [!CAUTION]
 > **The use of this module under a different name on PyPI (or another source besides this GitHub) is not associated with this library.**
-> **anisama streams from Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix. We are not responsible for any misuse.**
+> **anisama streams from Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix, Franime. We are not responsible for any misuse.**
 
 ## About
 
 <strong>Welcome to <code>anisama</code>, a Python CLI to browse, watch, and download anime from multiple sources (VOSTFR/VF).</strong>
 
 - Inspired by [ani-cli](https://github.com/pystardust/ani-cli), the original shell-based anime streaming tool.
-- Scrapes 6 sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix.
+- Scrapes 7 sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix, Franime.
 - Interactive TUI built with Rich and Questionary.
 - Connects to the anisama API for fast search and video resolution.
 
@@ -45,7 +45,8 @@ anisama/
 │   │   ├── myfluneo.py        # MyFluneo scraper (Playwright)
 │   │   ├── animesultra.py     # AnimesUltra scraper
 │   │   ├── frenchanime.py     # FrenchAnime scraper
-│   │   └── animoflix.py       # AnimoFlix scraper (Playwright)
+│   │   ├── animoflix.py       # AnimoFlix scraper (Playwright)
+│   │   └── franime.py         # Franime scraper (API-based)
 │   └── cli/                   # CLI-specific code
 │       ├── app.py             # Entry point, click command
 │       ├── display.py         # Banner, colors, info panels
@@ -63,8 +64,8 @@ anisama/
 
 ## Features
 
-- Search anime by title with fuzzy matching (rapidfuzz) across 6 sources
-- Multi-source merge: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix
+- Search anime by title with fuzzy matching (rapidfuzz) across 7 sources
+- Multi-source merge: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix, Franime
 - Intelligent dedup: season/lang variants grouped under one result
 - Smart search: exact match shows only relevant results, broad queries show variants
 - Browse seasons (VOSTFR / VF)
@@ -187,6 +188,7 @@ for name, source in SOURCES.items():
 | [AnimesUltra](https://ww.animesultra.org) | VOSTFR/VF | Sitemap/HTML |
 | [French-Anime](https://french-anime.com) | VOSTFR/VF | HTML scraping |
 | [AnimoFlix](https://animoflix.to) | VOSTFR | HTML + Playwright |
+| [Franime](https://franime.fr) | VOSTFR/VF | API |
 
 ## Contributing
 
@@ -196,4 +198,4 @@ for name, source in SOURCES.items():
 ## Credits
 
 - [pystardust/ani-cli](https://github.com/pystardust/ani-cli) for the original idea and workflow
-- Content sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix
+- Content sources: Anime-Sama, Voiranime, MyFluneo, AnimesUltra, French-Anime, AnimoFlix, Franime

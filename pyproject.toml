@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anisama"
-version = "2.0.0"
+version = "2.1.0"
 description = "Anisama — multi-source anime scraping, search, resolution, and CLI"
 authors = [{name = "6sfy"}]
 readme = "README.md"

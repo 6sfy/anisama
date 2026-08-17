@@ -21,7 +21,7 @@ def _clean(t):
 
 def _get(path):
     url = f"{API_BASE}{path}"
-    req = Request(url, headers={"User-Agent": "anisama-cli/2.0.0"})
+    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.0"})
     try:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())

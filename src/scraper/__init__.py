@@ -14,6 +14,7 @@ from . import myfluneo
 from . import animesultra
 from . import frenchanime
 from . import animoflix
+from . import franime
 
 # Re-export key functions for backward compatibility
 from .base import find_active_domain
@@ -26,5 +27,6 @@ __all__ = [
     "animesultra",
     "frenchanime",
     "animoflix",
+    "franime",
     "find_active_domain",
 ]

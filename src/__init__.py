@@ -12,7 +12,7 @@ Usage::
     from anisama.cli.app import main
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __app_name__ = "anisama"
 
 # Convenient top-level re-exports (core)

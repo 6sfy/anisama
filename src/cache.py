@@ -400,8 +400,13 @@ def download_combined_catalog(domain: str, enrich: bool = True) -> list[dict[str
         mf_entries = myfluneo_catalog()
     except Exception:
         mf_entries = []
+    try:
+        from .scraper.franime import franime_catalog
+        fi_entries = franime_catalog()
+    except Exception:
+        fi_entries = []
 
-    if not as_entries and not vr_entries and not au_entries and not fa_entries and not af_entries and not mf_entries:
+    if not as_entries and not vr_entries and not au_entries and not fa_entries and not af_entries and not mf_entries and not fi_entries:
         return existing or []
 
     if enrich and vr_entries:
@@ -422,6 +427,8 @@ def download_combined_catalog(domain: str, enrich: bool = True) -> list[dict[str
         merged = merge_source_into_catalog(merged, af_entries, "animoflix")
     if mf_entries:
         merged = merge_source_into_catalog(merged, mf_entries, "myfluneo")
+    if fi_entries:
+        merged = merge_source_into_catalog(merged, fi_entries, "franime")
 
     save_catalog(merged)
     return merged
