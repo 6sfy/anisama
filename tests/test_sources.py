@@ -8,13 +8,13 @@ import pytest
 class TestSourcesDict:
     """Test SOURCES registry."""
 
-    def test_sources_has_6_entries(self):
+    def test_sources_has_7_entries(self):
         from anisama.sources import SOURCES
-        assert len(SOURCES) == 6
+        assert len(SOURCES) == 7
 
     def test_sources_has_expected_names(self):
         from anisama.sources import SOURCES
-        expected = {"anime-sama", "voiranime", "myfluneo", "animesultra", "frenchanime", "animoflix"}
+        expected = {"anime-sama", "voiranime", "myfluneo", "animesultra", "frenchanime", "animoflix", "franime"}
         assert set(SOURCES.keys()) == expected
 
 
@@ -64,7 +64,7 @@ class TestGetSources:
     def test_get_sources_all(self):
         from anisama.sources import get_sources
         all_sources = get_sources()
-        assert len(all_sources) == 6
+        assert len(all_sources) == 7
 
     def test_get_sources_playwright_only(self):
         from anisama.sources import get_sources
@@ -76,7 +76,7 @@ class TestGetSources:
     def test_get_sources_non_playwright(self):
         from anisama.sources import get_sources
         non_pw = get_sources(needs_playwright=False)
-        assert len(non_pw) == 4
+        assert len(non_pw) == 5
         for s in non_pw:
             assert s.needs_playwright is False
 

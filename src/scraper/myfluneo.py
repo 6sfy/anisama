@@ -7,9 +7,10 @@ import re
 import time
 from pathlib import Path
 
-from ..config import DATA_DIR, PLAYWRIGHT_EXECUTABLE_PATH, REQUEST_TIMEOUT
+from ..config import DATA_DIR
 from ..http_client import get_client
 from ..exceptions import ScraperError
+from .pw_utils import launch_browser
 
 MYFLUNEO_DOMAIN = "myfluneo.eu"
 MYFLUNEO_HEADERS = {
@@ -29,13 +30,6 @@ def _check_playwright():
             "Playwright is required for MyFluneo scraping. "
             "Install with: pip install anisama[playwright] && playwright install chromium"
         )
-
-
-def _get_chromium_executable():
-    """Return the Playwright chromium executable path if configured."""
-    if PLAYWRIGHT_EXECUTABLE_PATH:
-        return PLAYWRIGHT_EXECUTABLE_PATH
-    return None
 
 
 def _base_slug(slug):
@@ -106,12 +100,13 @@ def myfluneo_resolve(episode_url):
     """Resolve a MyFluneo episode URL to a direct video URL using Playwright."""
     try:
         sync_playwright = _check_playwright()
+    except ScraperError:
+        raise
+    pw = None
+    browser = None
+    try:
         pw = sync_playwright().start()
-        launch_kwargs = {"headless": True}
-        exec_path = _get_chromium_executable()
-        if exec_path:
-            launch_kwargs["executable_path"] = exec_path
-        browser = pw.chromium.launch(**launch_kwargs)
+        browser = launch_browser(pw)
         page = browser.new_page()
 
         video_url = None
@@ -142,17 +137,24 @@ def myfluneo_resolve(episode_url):
                         except Exception:
                             pass
 
-        browser.close()
-        pw.stop()
-
         if video_url:
             return {"url": video_url, "type": "mp4", "referer": episode_url}
         return {"url": episode_url, "type": "raw", "referer": episode_url}
-
     except ScraperError:
         raise
     except Exception:
         return {"url": episode_url, "type": "raw", "referer": episode_url}
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
 
 
 def myfluneo_episodes(anime_url):
@@ -168,14 +170,12 @@ def myfluneo_episodes(anime_url):
         except Exception:
             pass
 
+    pw = None
+    browser = None
     try:
         sync_playwright = _check_playwright()
         pw = sync_playwright().start()
-        launch_kwargs = {"headless": True}
-        exec_path = _get_chromium_executable()
-        if exec_path:
-            launch_kwargs["executable_path"] = exec_path
-        browser = pw.chromium.launch(**launch_kwargs)
+        browser = launch_browser(pw)
         page = browser.new_page()
 
         episodes = {}
@@ -208,9 +208,6 @@ def myfluneo_episodes(anime_url):
                         ep_url = f"https://{MYFLUNEO_DOMAIN}{ep_url}"
                     episodes[ep_num] = {"url": ep_url, "season": m.group(1)}
 
-        browser.close()
-        pw.stop()
-
         eps = [
             {"number": n, "url": e["url"], "lang": "vostfr", "season": e.get("season", "1")}
             for n, e in sorted(episodes.items())
@@ -226,3 +223,14 @@ def myfluneo_episodes(anime_url):
         raise
     except Exception:
         return []
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass

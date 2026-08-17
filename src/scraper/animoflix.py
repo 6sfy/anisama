@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from ..config import REQUEST_TIMEOUT
 from ..http_client import get_client
 from ..exceptions import ScraperError
+from .pw_utils import launch_browser
 
 _ALT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -101,9 +102,11 @@ def animoflix_episodes(url):
     if sync_pw is None:
         return []
 
+    pw = None
+    browser = None
     try:
         pw = sync_pw().start()
-        browser = pw.chromium.launch(headless=True)
+        browser = launch_browser(pw)
         page = browser.new_page()
         page.goto(url, wait_until="networkidle", timeout=30000)
         page.wait_for_timeout(2000)
@@ -117,11 +120,19 @@ def animoflix_episodes(url):
                     href = f"https://{_AF_DOMAIN}{href}"
                 if not any(e["number"] == ep_num for e in eps):
                     eps.append({"number": ep_num, "url": href, "lang": "vostfr"})
-
-        browser.close()
-        pw.stop()
     except Exception:
         pass
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
 
     return sorted(eps, key=lambda x: x["number"])
 
@@ -155,9 +166,11 @@ def animoflix_resolve(url):
     if sync_pw is None:
         return {"url": url, "type": "raw", "referer": url}
 
+    pw = None
+    browser = None
     try:
         pw = sync_pw().start()
-        browser = pw.chromium.launch(headless=True)
+        browser = launch_browser(pw)
         page = browser.new_page()
         page.goto(url, wait_until="networkidle", timeout=30000)
         page.wait_for_timeout(2000)
@@ -173,13 +186,19 @@ def animoflix_resolve(url):
                 if src and "javascript" not in src:
                     if src.startswith("//"):
                         src = "https:" + src
-                    browser.close()
-                    pw.stop()
                     return {"url": src, "type": "embed", "referer": url}
-
-        browser.close()
-        pw.stop()
     except Exception:
         pass
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                pw.stop()
+            except Exception:
+                pass
 
     return {"url": url, "type": "raw", "referer": url}
