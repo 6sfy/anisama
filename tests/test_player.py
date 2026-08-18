@@ -116,6 +116,61 @@ def test_api_dead_url_rejected_local_wins(monkeypatch):
     assert "https://dead/master.m3u8" in alive_seen
 
 
+def test_api_dead_url_embed_ref_fallback_wins_and_reports(monkeypatch):
+    """Dead API URL with an embed referer -> re-resolve the embed locally,
+    win as api-fallback, and write the fresh URL back to the API."""
+    reported = []
+
+    def fake_report(source, slug, n, r):
+        reported.append((slug, n, r["url"]))
+
+    monkeypatch.setattr("anisama.cli.api_client.resolve_episode", lambda *a, **k: ("https://dead/master.m3u8", "m3u8", "https://smoothpre.com/embed/abc123"))
+    monkeypatch.setattr("anisama.resolver.resolve_url", lambda u: {"url": "https://ok/master.m3u8", "type": "m3u8"})
+    monkeypatch.setattr("anisama.cli.workflow.resolve_best_mirror", lambda *a, **k: None)
+    monkeypatch.setattr("anisama.cli.workflow.pick_fastest_mirror", lambda *a, **k: None)
+    monkeypatch.setattr(wf, "_report_local_resolution", fake_report)
+    monkeypatch.setattr(player_mod, "stream_is_alive", lambda url, rtype="mp4", referer=None, timeout=8: url == "https://ok/master.m3u8")
+
+    r = wf._resolve_episode({"mirrors": {"eps1": "https://mirror"}}, 12, quiet=True, source="anime-sama", slug="jjk")
+
+    assert r["url"] == "https://ok/master.m3u8"
+    assert r["referer"] == "https://smoothpre.com/embed/abc123"
+    assert reported == [("jjk", 12, "https://ok/master.m3u8")]
+
+
+def test_api_dead_url_embed_ref_fallback_dead_rejected(monkeypatch):
+    """If the embed re-resolve is also dead, nothing wins."""
+    monkeypatch.setattr(wf.threading, "Event", lambda: _FakeEvent())
+    monkeypatch.setattr("anisama.cli.api_client.resolve_episode", lambda *a, **k: ("https://dead/master.m3u8", "m3u8", "https://smoothpre.com/embed/abc123"))
+    monkeypatch.setattr("anisama.resolver.resolve_url", lambda u: {"url": "https://also-dead/master.m3u8", "type": "m3u8"})
+    monkeypatch.setattr("anisama.cli.workflow.resolve_best_mirror", lambda *a, **k: None)
+    monkeypatch.setattr("anisama.cli.workflow.pick_fastest_mirror", lambda *a, **k: None)
+    monkeypatch.setattr(wf, "_report_local_resolution", lambda *a, **k: None)
+    monkeypatch.setattr(player_mod, "stream_is_alive", lambda *a, **k: False)
+
+    r = wf._resolve_episode({"mirrors": {"eps1": "https://mirror"}}, 12, quiet=True, source="anime-sama", slug="jjk")
+
+    assert r is None
+
+
+def test_api_dead_non_embed_ref_not_re_resolved(monkeypatch):
+    """A dead API URL whose referer is not an embed page is simply rejected."""
+    called = []
+
+    monkeypatch.setattr(wf.threading, "Event", lambda: _FakeEvent())
+    monkeypatch.setattr("anisama.cli.api_client.resolve_episode", lambda *a, **k: ("https://dead/master.m3u8", "m3u8", "https://anime-sama.to/catalogue/x/ep12"))
+    monkeypatch.setattr("anisama.resolver.resolve_url", lambda u: called.append(u) or {})
+    monkeypatch.setattr("anisama.cli.workflow.resolve_best_mirror", lambda *a, **k: None)
+    monkeypatch.setattr("anisama.cli.workflow.pick_fastest_mirror", lambda *a, **k: None)
+    monkeypatch.setattr(wf, "_report_local_resolution", lambda *a, **k: None)
+    monkeypatch.setattr(player_mod, "stream_is_alive", lambda *a, **k: False)
+
+    r = wf._resolve_episode({"mirrors": {"eps1": "https://mirror"}}, 12, quiet=True, source="anime-sama", slug="jjk")
+
+    assert r is None
+    assert called == []
+
+
 def test_local_winner_reports_to_api(monkeypatch):
     reported = []
 

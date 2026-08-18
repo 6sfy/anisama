@@ -325,7 +325,24 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
                 if rtype not in ("embed", "raw") and not player_mod.stream_is_alive(
                     url, rtype, ref
                 ):
-                    return  # Dead URL from API — don't accept it
+                    # Dead URL from API — try resolving the referer embed URL locally
+                    # The API often caches hls4 /stream/ URLs that are always 403,
+                    # but the referer contains the embed URL which can be resolved
+                    # through resolve_url() to get a working hls2 CDN URL.
+                    if ref and "embed" in ref:
+                        try:
+                            from anisama.resolver import resolve_url
+                            local_r = resolve_url(ref)
+                            if local_r and local_r.get("url") and local_r.get("type") not in ("embed", "raw"):
+                                if player_mod.stream_is_alive(
+                                    local_r["url"], local_r.get("type", "mp4"), ref
+                                ):
+                                    local_r["referer"] = ref
+                                    _win("api-fallback", local_r)
+                                    return
+                        except Exception:
+                            pass
+                    return  # Dead URL and no fallback — don't accept it
                 _win("api", {"url": url, "type": rtype, "referer": ref})
         except Exception:
             pass
@@ -355,6 +372,10 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
             _report_local_resolution(source, slug, n, r)
             if not quiet:
                 ok(f"Resolved locally: {r.get('type','raw').upper()} from {urlparse(r['url']).netloc}")
+        elif tag == "api-fallback":
+            _report_local_resolution(source, slug, n, r)
+            if not quiet:
+                ok(f"Fresh embed re-resolve: {r.get('type','raw').upper()} from {urlparse(r['url']).netloc}")
         elif not quiet:
             ok(f"Resolved via API: {r.get('type','raw').upper()} from {urlparse(r['url']).netloc}")
         return r
