@@ -1,29 +1,94 @@
 """Main workflow: search → pick → resolve → play/download."""
 
-import os
+import queue
 import re
 import threading
 import time
+import webbrowser
 from pathlib import Path
-from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote, urlparse
 
-import httpx
 import questionary
-from rich.progress import Progress, SpinnerColumn, TextColumn
-
-from anisama import __version__, cache, search, resolver
-from anisama.config import RESOLVER_HEADERS
+from anisama import cache, resolver, search
 from anisama.scraper import find_active_domain
 from anisama.scraper.anime_sama import get_anime_seasons, get_episodes
-from anisama.scraper.voiranime import voiranime_get_seasons, voiranime_get_episodes
+from anisama.scraper.voiranime import voiranime_get_episodes, voiranime_get_seasons
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import api_client
-from .display import console, ST, QS, score_badge, note, ok, err, section_header, show_banner, show_anime_info, show_info
 from . import player as player_mod
-from .picker import parse_range, filter_seasons, with_spinner, pick_anime, pick_season, pick_ep, pick_lang, pick_player, BACK, PAGE_SIZE, NEXT, PREV
-from .mirror import pick_fastest_mirror, resolve_best_mirror, resolve_all_mirrors, pick_mirror, test_url_speed, format_speed, convert_m3u8_to_mp4, sanitize
+from .display import QS, ST, console, err, note, ok, show_anime_info, show_banner, show_info
 from .install import check_ffmpeg, install_ffmpeg_interactive
+from .mirror import convert_m3u8_to_mp4, pick_fastest_mirror, sanitize
+from .picker import (
+    BACK,
+    NEXT,
+    PAGE_SIZE,
+    PREV,
+    filter_seasons,
+    parse_range,
+    pick_anime,
+    pick_ep,
+    pick_lang,
+    pick_player,
+    pick_season,
+    with_spinner,
+)
+
+# ── Fast engine local (anisama.engine) ──
+# Le moteur extrait directement les API d'anime-sama (episodes.js -> embeds
+# directs, domaine actif détecté via anime-sama.pw) et de franime (JSON,
+# indexes 0-based) : moins de requêtes, zéro parsing BeautifulSoup.
+# Fallback automatique sur le scraper historique en cas d'échec.
+
+_ENG = None
+
+
+def _fast_engine():
+    """Instance moteur locale (lazy). Retourne None si indisponible."""
+    global _ENG
+    if _ENG is None:
+        try:
+            from anisama.engine import Engine
+            _ENG = Engine(sources=["anime-sama", "franime"])
+        except Exception:
+            _ENG = False
+    return _ENG or None
+
+
+def _catalogue_slug(url):
+    m = re.search(r"/catalogue/([^/]+)", url or "")
+    return m.group(1) if m else None
+
+
+def _get_seasons_fast(url):
+    """Saisons anime-sama via le moteur local (rapide), fallback historique."""
+    eng = _fast_engine()
+    if eng:
+        try:
+            slug = _catalogue_slug(url)
+            if slug:
+                ss = eng.as_.seasons(slug)
+                if ss:
+                    return ss
+        except Exception:
+            pass
+    return get_anime_seasons(url)
+
+
+def _get_episodes_fast(season_url):
+    """Épisodes anime-sama (miroirs embeds directs) via le moteur, fallback historique."""
+    eng = _fast_engine()
+    if eng:
+        try:
+            slug = _catalogue_slug(season_url)
+            if slug:
+                eps = eng.as_.episodes(slug, season_url)
+                if eps:
+                    return eps
+        except Exception:
+            pass
+    return get_episodes(season_url)
 
 
 def ensure_catalog(domain, force=False, settings=None, api_base=None):
@@ -65,7 +130,6 @@ def anime_flow(anime, lang, download, episodes, pref, quiet, dl_dir, settings,
     player_path = None
     source = anime.get("source", "catalog")
     url = anime["link"]
-    slug = _slug(url)
 
     if not quiet:
         ok(f"Selected: {anime['title']}")
@@ -75,7 +139,7 @@ def anime_flow(anime, lang, download, episodes, pref, quiet, dl_dir, settings,
         return
 
     while True:
-        all_s = with_spinner("Fetching seasons...", get_anime_seasons, url)
+        all_s = with_spinner("Fetching seasons...", _get_seasons_fast, url)
         seasons = filter_seasons(all_s)
 
         if lang:
@@ -97,7 +161,7 @@ def anime_flow(anime, lang, download, episodes, pref, quiet, dl_dir, settings,
 
         s_url = season["url"]
         s_name = season.get("name", "")
-        eps = with_spinner("Fetching episodes...", get_episodes, s_url)
+        eps = with_spinner("Fetching episodes...", _get_episodes_fast, s_url)
         if not eps:
             err("No episodes found.")
             break
@@ -294,20 +358,84 @@ def _report_local_resolution(source, slug, n, r):
         pass
 
 
-def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="anime-sama", slug="", fresh=False):
+def _resolve_embed_direct(embed_url):
+    """Resolve an embed page to a direct, alive stream URL (or None)."""
+    if not embed_url:
+        return None
+    try:
+        r = resolver.resolve_url(embed_url)
+    except Exception:
+        return None
+    if not r or not r.get("url"):
+        return None
+    rtype = r.get("type", "raw")
+    if rtype in ("embed", "raw"):
+        return None
+    r.setdefault("referer", embed_url)
+    if not player_mod.stream_is_alive(r["url"], rtype, r.get("referer")):
+        return None
+    return r
+
+
+def _resolve_first_playable(ep, timeout=12):
+    """Resolve all mirrors in parallel; return the first direct, alive stream.
+
+    Daemon threads + early return: slow/unreachable hosts (uqload, etc.) never
+    block playback once a working m3u8/mp4 has been found.
+    """
+    mirrors = (ep or {}).get("mirrors") or {}
+    if not mirrors:
+        return None
+
+    found = queue.Queue()
+
+    def worker(url):
+        r = _resolve_embed_direct(url)
+        if r:
+            found.put(r)
+
+    for _, url in sorted(mirrors.items(), key=lambda kv: int(kv[0][3:])):
+        threading.Thread(target=worker, args=(url,), daemon=True).start()
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            return found.get(timeout=0.25)
+        except queue.Empty:
+            continue
+    return None
+
+
+def _open_embed(url, title, n):
+    """Open an embed/watch2 page in the browser (no direct stream available)."""
+    page = "{base}/player?url={url}&title={title}".format(
+        base=api_client.API_BASE,
+        url=quote(url, safe=""),
+        title=quote(f"{title} EP{n}", safe=""),
+    )
+    try:
+        opened = webbrowser.open(page)
+    except Exception:
+        opened = False
+    if not opened:
+        webbrowser.open(url)
+
+
+def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="anime-sama", slug="", fresh=False,
+                     allow_embed=False):
     """Resolve an episode video URL by trying ALL mirrors in parallel.
 
     No priority system — all sources are tried equally. The first ALIVE
     URL wins, with soft preference for mp4 over m3u8 among alive URLs.
 
-    The API worker and local mirror worker race in parallel. The local
-    worker now uses resolve_best_mirror() which resolves all mirrors,
-    checks liveness, and returns only alive URLs.
+    The API worker and local mirror worker race in parallel. API embeds are
+    never accepted as-is: they are resolved to a direct stream or kept as a
+    browser fallback (the player cannot play an embed page).
     """
     if not quiet:
         console.print(f"\n[{ST['sel']}]Episode {n}:[/{ST['sel']}] Resolving video URL...")
 
-    box = {"winner": None}
+    box = {"winner": None, "fallback": None}
     lock = threading.Lock()
     done = threading.Event()
 
@@ -320,50 +448,65 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
     def _api_worker():
         try:
             url, rtype, ref = api_client.resolve_episode(source, slug, n, fresh=fresh)
-            if url:
-                # Verify API result is alive before accepting it
-                if rtype not in ("embed", "raw") and not player_mod.stream_is_alive(
-                    url, rtype, ref
-                ):
-                    # Dead URL from API — try resolving the referer embed URL locally
-                    # The API often caches hls4 /stream/ URLs that are always 403,
-                    # but the referer contains the embed URL which can be resolved
-                    # through resolve_url() to get a working hls2 CDN URL.
-                    if ref and "embed" in ref:
-                        try:
-                            from anisama.resolver import resolve_url
-                            local_r = resolve_url(ref)
-                            if local_r and local_r.get("url") and local_r.get("type") not in ("embed", "raw"):
-                                if player_mod.stream_is_alive(
-                                    local_r["url"], local_r.get("type", "mp4"), ref
-                                ):
-                                    local_r["referer"] = ref
-                                    _win("api-fallback", local_r)
-                                    return
-                        except Exception:
-                            pass
-                    return  # Dead URL and no fallback — don't accept it
-                _win("api", {"url": url, "type": rtype, "referer": ref})
+            if not url:
+                return
+            if rtype in ("embed", "raw"):
+                # The fast engine returns the first mirror (often uqload, which
+                # is domain-restricted). Never hand an embed page to mpv/VLC:
+                # keep it as a browser fallback, then try to resolve it locally
+                # while the local worker races the other mirrors.
+                with lock:
+                    if box["fallback"] is None:
+                        box["fallback"] = {"url": url, "type": rtype, "referer": ref}
+                direct = _resolve_embed_direct(url)
+                if direct:
+                    _win("api-fallback", direct)
+                return
+            # Verify direct API result is alive before accepting it
+            if not player_mod.stream_is_alive(url, rtype, ref):
+                # Dead URL from API — try resolving the referer embed URL locally.
+                direct = _resolve_embed_direct(ref) if ref and "embed" in ref else None
+                if direct:
+                    _win("api-fallback", direct)
+                return
+            _win("api", {"url": url, "type": rtype, "referer": ref})
         except Exception:
             pass
 
     def _local_worker():
         try:
-            # resolve_best_mirror() now resolves ALL mirrors in parallel,
-            # checks liveness, and returns only alive URLs
-            r = resolve_best_mirror(e, prefer_mp4=prefer_mp4)
+            r = _resolve_first_playable(e, timeout=12)
             if r:
                 _win("local", r)
         except Exception:
             pass
 
-    workers = [threading.Thread(target=_api_worker, daemon=True)]
+    worker_fns = [_api_worker]
     if e and e.get("mirrors"):
-        workers.append(threading.Thread(target=_local_worker, daemon=True))
+        worker_fns.append(_local_worker)
+
+    remaining = {"n": len(worker_fns)}
+    all_done = threading.Event()
+
+    def _worker_entry(fn):
+        try:
+            fn()
+        finally:
+            with lock:
+                remaining["n"] -= 1
+                if remaining["n"] == 0:
+                    all_done.set()
+
+    workers = [
+        threading.Thread(target=_worker_entry, args=(fn,), daemon=True)
+        for fn in worker_fns
+    ]
     for w in workers:
         w.start()
 
-    done.wait(timeout=30)
+    deadline = time.monotonic() + 16
+    while time.monotonic() < deadline and not done.is_set() and not all_done.is_set():
+        done.wait(timeout=0.1)
     winner = box["winner"]
 
     if winner:
@@ -380,23 +523,34 @@ def _resolve_episode(e, n, quiet, prefer_mp4=True, allow_pick=False, source="ani
             ok(f"Resolved via API: {r.get('type','raw').upper()} from {urlparse(r['url']).netloc}")
         return r
 
+    fallback = box["fallback"]
+    if fallback and allow_embed:
+        if not quiet:
+            note("No direct stream found — opening embed in browser.")
+        return fallback
+
     # Both workers failed or returned dead URLs — try full parallel resolve
     # with speed testing as a last resort
-    if not quiet:
-        note("First resolution attempt returned no alive URLs, trying all mirrors...")
-    local_r = pick_fastest_mirror(e, prefer_mp4=prefer_mp4, test_speed=True, quiet=quiet)
-    if local_r:
-        # Verify this one is alive too
-        if local_r.get("type") not in ("embed", "raw") and not player_mod.stream_is_alive(
-            local_r["url"], local_r.get("type", "mp4"), local_r.get("referer")
-        ):
-            if not quiet:
-                err("All resolved URLs are dead (expired tokens).")
-            return None
-        _report_local_resolution(source, slug, n, local_r)
+    if e and e.get("mirrors"):
         if not quiet:
-            ok(f"Best source: {local_r.get('type','raw').upper()} from {urlparse(local_r['url']).netloc}")
-        return local_r
+            note("First resolution attempt returned no alive URLs, trying all mirrors...")
+        local_r = pick_fastest_mirror(e, prefer_mp4=prefer_mp4, test_speed=True, quiet=quiet)
+        if local_r:
+            # Verify this one is alive too
+            if local_r.get("type") not in ("embed", "raw") and not player_mod.stream_is_alive(
+                local_r["url"], local_r.get("type", "mp4"), local_r.get("referer")
+            ):
+                if not quiet:
+                    err("All resolved URLs are dead (expired tokens).")
+                return None
+            if local_r.get("type") not in ("embed", "raw"):
+                _report_local_resolution(source, slug, n, local_r)
+            if not quiet:
+                ok(f"Best source: {local_r.get('type','raw').upper()} from {urlparse(local_r['url']).netloc}")
+            return local_r
+
+    if fallback and allow_embed:
+        return fallback
 
     err(f"Failed to resolve episode {n}.")
     return None
@@ -450,12 +604,19 @@ def play_eps(eps, nums, player_path, quiet, keep_open=True, anime_title="", anim
     slug = anime_link.rstrip("/").split("/")[-1] if anime_link else ""
     for n in nums:
         e = eps[n - 1]
-        r = _resolve_episode(e, n, quiet, prefer_mp4=prefer_mp4, allow_pick=True, source="anime-sama", slug=slug)
+        r = _resolve_episode(e, n, quiet, prefer_mp4=prefer_mp4, allow_pick=True, source="anime-sama", slug=slug,
+                             allow_embed=True)
         if not r:
             continue
-        if not quiet:
-            ok(f"Playing episode {n} ({r.get('type', 'raw')})...")
-        player_mod.play_url(r["url"], player_path, r.get("referer"), keep_open)
+        rtype = r.get("type", "raw")
+        if rtype in ("embed", "watch2") or r["url"].startswith("https://franime.fr/watch2/"):
+            if not quiet:
+                note(f"No direct stream — opening episode {n} in browser...")
+            _open_embed(r["url"], anime_title, n)
+        else:
+            if not quiet:
+                ok(f"Playing episode {n} ({rtype})...")
+            player_mod.play_url(r["url"], player_path, r.get("referer"), keep_open)
         cache.add_history(anime_title, anime_link, "anime-sama", n, season_url=season_url, season_name=season_name)
 
 

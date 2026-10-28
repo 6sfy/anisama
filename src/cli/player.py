@@ -5,6 +5,7 @@ import platform
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urljoin
 
 from .config import PLAYER_PATHS
 
@@ -21,26 +22,52 @@ def _fetch_headers(referer=None):
     return headers
 
 
+def _hls_playlist_alive(url, headers, timeout, depth=0):
+    """Validate an HLS playlist and at least one real media segment."""
+    import httpx
+
+    if depth > 2:
+        return False
+    r = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+    if r.status_code != 200:
+        return False
+    body = getattr(r, "text", None)
+    if body is None:
+        body = r.content.decode("utf-8", "ignore")
+    if "#extm3u" not in body.lower():
+        return False
+    uris = [line.strip() for line in body.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+    if not uris:
+        return True
+    target = urljoin(url, uris[0])
+    if ".m3u8" in target.split("?", 1)[0].lower():
+        return _hls_playlist_alive(target, headers, timeout, depth + 1)
+    segment = httpx.get(target, headers=headers, timeout=timeout, follow_redirects=True)
+    return segment.status_code in (200, 206)
+
+
 def stream_is_alive(url, rtype="mp4", referer=None, timeout=8):
-    """Lightweight liveness check before handing a URL to a player."""
+    """Liveness check before handing a URL to a player.
+
+    For HLS, the manifest alone is not enough: servers often serve the
+    master/variant while rejecting segments from another IP/ASN. A real
+    segment must be fetchable, otherwise the token is unusable.
+    """
     import httpx
 
     headers = _fetch_headers(referer)
     try:
         if rtype == "m3u8":
-            r = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
-            if r.status_code != 200:
-                return False
-            body = r.content[:1024].lower()
-            ctype = r.headers.get("content-type", "").lower()
-            return b"#extm3u" in body or "mpegurl" in ctype
-        r = httpx.head(url, headers=headers, timeout=timeout, follow_redirects=True)
-        if r.status_code in (200, 206):
-            return True
-        if r.status_code == 405:
-            r = httpx.get(url, headers={**headers, "Range": "bytes=0-0"}, timeout=timeout, follow_redirects=True)
-            return r.status_code in (200, 206, 416)
-        return False
+            return _hls_playlist_alive(url, headers, timeout)
+        r = httpx.get(url, headers={**headers, "Range": "bytes=0-1"},
+                      timeout=timeout, follow_redirects=True)
+        if r.status_code not in (200, 206, 416):
+            return False
+        ctype = (r.headers.get("content-type") or "").lower()
+        if "text/html" in ctype or "application/json" in ctype:
+            return False
+        return True
     except Exception:
         return False
 

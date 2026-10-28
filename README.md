@@ -75,6 +75,7 @@ anisama/
 - Multiple video mirrors with automatic speed-tested fallback
 - Player support: mpv, VLC, IINA, MoonPlayer, ImPlay
 - API-first resolve with local fallback
+- **Local fast engine** (`anisama.engine`): direct API extraction for Anime-Sama (domain auto-detected via [anime-sama.pw](https://anime-sama.pw)) and FRAnime (0-based indexes), with automatic fallback to the classic scrapers
 - "Continue watching" history menu
 - AniList-powered info panel (score, status, episodes, studios, tags, synopsis)
 - Prefer MP4 sources over HLS/m3u8 for faster playback
@@ -189,6 +190,22 @@ for name, source in SOURCES.items():
 | [French-Anime](https://french-anime.com) | VOSTFR/VF | HTML scraping |
 | [AnimoFlix](https://animoflix.to) | VOSTFR | HTML + Playwright |
 | [Franime](https://franime.fr) | VOSTFR/VF | API |
+
+## Fast engine
+
+The bundled `anisama.engine` sub-package is a standalone, requests-only engine that extracts the **real APIs** of Anime-Sama and FRAnime (no BeautifulSoup, no Playwright):
+
+```python
+from anisama.engine import Engine
+
+e = Engine()
+e.search("naruto")                       # les deux sources, dédoublonnées
+e.seasons("anime-sama", "naruto")        # saisons via panneauAnime
+e.episodes("anime-sama", "naruto")       # embeds DIRECTS depuis episodes.js
+e.resolve("franime", "13051", 1)         # indexes 0-based corrects
+```
+
+The CLI uses it automatically as the primary fetcher for anime-sama seasons/episodes (`_get_seasons_fast` / `_get_episodes_fast`) and silently falls back to the classic scrapers on failure. Domain discovery goes through the official status page [anime-sama.pw](https://anime-sama.pw) (`?check=<domain>` is tested server-side, so it works even if your IP is Cloudflare-blocked); set `ENGINE_PROXY` if your IP needs a proxy to reach the sites.
 
 ## Contributing
 

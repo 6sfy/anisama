@@ -35,7 +35,7 @@ def _clean(t):
 
 def _get(path, _retries=2):
     url = f"{API_BASE}{path}"
-    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.6"})
+    req = Request(url, headers={"User-Agent": "anisama-cli/2.1.7"})
     try:
         with urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
@@ -93,7 +93,7 @@ def submit_resolution(source, slug, num, url, rtype, referer=""):
         data=body,
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "anisama-cli/2.1.6",
+            "User-Agent": "anisama-cli/2.1.7",
         },
         method="POST",
     )
@@ -117,7 +117,7 @@ def get_anime_info(title):
 def fetch_catalog_count(api_base=None):
     base = api_base or API_BASE
     try:
-        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.1.6"}), timeout=5)
+        r = urlopen(Request(f"{base}/api/v2/sources", headers={"User-Agent": "anisama-cli/2.1.7"}), timeout=5)
         data = json.loads(r.read().decode())
         return data.get("total", 0)
     except Exception:

@@ -55,7 +55,7 @@ def pick_anime(results):
         page = results[offset:offset + PAGE_SIZE]
         choices = []
         for r in page:
-            sc = int(round(r["score"]))
+            sc = max(0, min(100, int(round(r.get("score", 0)))))
             choices.append(f"{r['title']}  [{sc}%]")
         if offset + PAGE_SIZE < total:
             choices.append(NEXT)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anisama"
-version = "2.1.6"
+version = "2.1.7"
 description = "Anisama — multi-source anime scraping, search, resolution, and CLI"
 authors = [{name = "6sfy"}]
 readme = "README.md"
@@ -44,7 +44,7 @@ anisama = "anisama.cli.app:main"
 
 [tool.setuptools]
 package-dir = { "anisama" = "src" }
-packages = ["anisama", "anisama.cli", "anisama.scraper"]
+packages = ["anisama", "anisama.cli", "anisama.scraper", "anisama.engine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

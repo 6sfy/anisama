@@ -8,11 +8,16 @@ Usage::
     from anisama.sources import SOURCES
     from anisama.config import KNOWN_DOMAINS, DEFAULT_HEADERS
 
+    # Fast local engine (extraction directe anime-sama + franime)
+    from anisama.engine import Engine
+    e = Engine()
+    e.search("naruto")
+
     # CLI interface
     from anisama.cli.app import main
 """
 
-__version__ = "2.1.6"
+__version__ = "2.1.7"
 __app_name__ = "anisama"
 
 # Convenient top-level re-exports (core)
@@ -34,4 +39,5 @@ __all__ = [
     "sources",
     "exceptions",
     "http_client",
+    "engine",
 ]
